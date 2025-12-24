@@ -4,6 +4,8 @@
 #include <unistd.h>
 #include <cstring>
 #include <iostream>
+#include <sys/time.h>
+
 
 bool UdpTransport::start(int port) {
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -21,6 +23,13 @@ bool UdpTransport::start(int port) {
         perror("bind");
         return false;
     }
+    timeval timeout{};
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 100000; // 100 ms
+
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+
 
     std::cout << "[UDP] Listening on port " << port << std::endl;
     return true;

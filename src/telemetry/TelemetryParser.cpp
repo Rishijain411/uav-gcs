@@ -12,19 +12,22 @@ TelemetryParser::TelemetryParser(TelemetryData& data, StateManager& stateMgr)
     : telemetry(data), stateManager(stateMgr) {}
 
 void TelemetryParser::parse(uint8_t byte) {
-    if (mavlink_parse_char(MAVLINK_COMM_0, byte, &msg, &status)) {
+    if (mavlink_parse_char(MAVLINK_COMM_0, byte, &msg, &status))
+    {
 
         if (msg.msgid == MAVLINK_MSG_ID_HEARTBEAT) {
-            telemetry.system_id = msg.sysid;
-            telemetry.component_id = msg.compid;
-            telemetry.heartbeat_received = true;
+        telemetry.system_id = msg.sysid;
+        telemetry.component_id = msg.compid;
+        telemetry.heartbeat_received = true;
+        telemetry.last_heartbeat_time = std::chrono::steady_clock::now();
 
-            if (stateManager.getState() == SystemState::DISCONNECTED) {
-                stateManager.setState(SystemState::CONNECTED);
-            }
-
-            std::cout << "[HEARTBEAT] Vehicle detected (SysID "
-                      << static_cast<int>(msg.sysid) << ")" << std::endl;
+        if (stateManager.getState() == SystemState::DISCONNECTED) {
+            stateManager.setState(SystemState::CONNECTED);
         }
+
+        std::cout << "[HEARTBEAT] Vehicle detected (SysID "
+                << static_cast<int>(msg.sysid) << ")" << std::endl;
+        }
+
     }
 }
