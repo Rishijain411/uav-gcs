@@ -12,6 +12,7 @@ add_executable(my_gcs
     src/comm/UdpTransport.cpp
     src/telemetry/TelemetryParser.cpp
     src/core/StateManager.cpp
+    src/command/CommandManager.cpp
 )
 
 target_include_directories(my_gcs PRIVATE
