@@ -12,3 +12,8 @@ void StateManager::setState(SystemState newState) {
 SystemState StateManager::getState() const {
     return currentState;
 }
+
+// ✅ NEW: FAILSAFE query helper
+bool StateManager::isInFailsafe() const {
+    return currentState == SystemState::FAILSAFE;
+}
