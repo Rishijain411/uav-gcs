@@ -1,6 +1,8 @@
 #include <iostream>
 #include <chrono>
 
+using namespace std;
+
 #include "comm/UdpTransport.h"
 #include "telemetry/TelemetryParser.h"
 #include "telemetry/TelemetryData.h"
@@ -19,76 +21,80 @@ int main() {
     CommandManager commandManager;
     TelemetryParser parser(telemetry, stateManager);
 
-    bool arm_intent_sent = false;
-
     if (!udp.start(14550)) {
-        std::cerr << "Failed to start UDP transport" << std::endl;
+        cerr << "Failed to start UDP transport\n";
         return -1;
     }
 
-    // ---------- GCS Heartbeat ----------
+    // ---------------- GCS Heartbeat ----------------
     GcsHeartbeat gcsHeartbeat(udp.getSocketFd());
-    auto last_hb = std::chrono::steady_clock::now();
-    auto last_failsafe_check = std::chrono::steady_clock::now();
+    auto last_hb = chrono::steady_clock::now();
+    auto last_failsafe_check = chrono::steady_clock::now();
 
-    std::cout << "[GCS] Heartbeat sender initialized" << std::endl;
+    cout << "[GCS] Heartbeat sender initialized\n";
 
-    // ---------- Command sender ----------
+    // ---------------- Command sender ----------------
     MavlinkCommandSender* cmdSender = nullptr;
     bool sender_initialized = false;
 
     uint8_t buffer[2048];
 
+    // ---------------- Mission definition ----------------
+    static VehicleCommand mission[] = {
+        VehicleCommand::ARM,
+        VehicleCommand::SET_MODE_AUTO,
+        VehicleCommand::TAKEOFF
+    };
+
+    static constexpr int MISSION_LEN =
+        sizeof(mission) / sizeof(mission[0]);
+
+    static int mission_step = 0;
+
+    // ================= MAIN LOOP =================
     while (true) {
 
-        auto now = std::chrono::steady_clock::now();
+        auto now = chrono::steady_clock::now();
 
         // ---------- Send GCS heartbeat ----------
-        if (std::chrono::duration_cast<std::chrono::seconds>(
-                now - last_hb).count() >= 1) {
-
+        if (chrono::duration_cast<chrono::seconds>(now - last_hb).count() >= 1) {
             gcsHeartbeat.send();
             last_hb = now;
         }
 
-        // ---------- Receive UDP ----------
+        // ---------- Receive MAVLink ----------
         int len = udp.receive(buffer, sizeof(buffer));
         if (len > 0) {
-            for (int i = 0; i < len; i++) {
+            for (int i = 0; i < len; i++)
                 parser.parse(buffer[i]);
-            }
         }
 
         // ---------- Command lifecycle ----------
         commandManager.update(telemetry, stateManager.getMutableState());
-        if (commandManager.commandFinished()) {
-            commandManager.clearCommandFinished();
-        }
 
         // ---------- Init command sender ----------
         if (!sender_initialized && telemetry.heartbeat_received) {
             cmdSender = new MavlinkCommandSender(
                 udp.getSocketFd(),
-                telemetry.system_id,
-                telemetry.component_id
+                telemetry.system_id
             );
             commandManager.setCommandSender(cmdSender);
             sender_initialized = true;
         }
 
-        // ---------- FAILSAFE CHECK (PRODUCTION-GRADE) ----------
+        // ---------- FAILSAFE CHECK ----------
         if (telemetry.heartbeat_received &&
-            std::chrono::duration_cast<std::chrono::milliseconds>(
+            chrono::duration_cast<chrono::milliseconds>(
                 now - last_failsafe_check).count() >= 200) {
 
             last_failsafe_check = now;
 
             auto hb_elapsed =
-                std::chrono::duration_cast<std::chrono::milliseconds>(
+                chrono::duration_cast<chrono::milliseconds>(
                     now - telemetry.last_heartbeat_time).count();
 
             auto link_elapsed =
-                std::chrono::duration_cast<std::chrono::milliseconds>(
+                chrono::duration_cast<chrono::milliseconds>(
                     now - telemetry.last_mavlink_rx_time).count();
 
             if (hb_elapsed > HEARTBEAT_TIMEOUT_MS &&
@@ -96,67 +102,28 @@ int main() {
                 stateManager.getState() != SystemState::FAILSAFE) {
 
                 stateManager.setState(SystemState::FAILSAFE);
-                std::cout << "[FAILSAFE] MAVLink link timeout" << std::endl;
+                cout << "[FAILSAFE] MAVLink timeout\n";
             }
         }
 
-        // ---------- FAILSAFE RECOVERY ----------
-        if (stateManager.isInFailsafe()) {
-
-            auto link_elapsed =
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    now - telemetry.last_mavlink_rx_time).count();
-
-            if (link_elapsed <= HEARTBEAT_TIMEOUT_MS) {
-                stateManager.setState(SystemState::CONNECTED);
-                std::cout << "[RECOVERY] Link restored" << std::endl;
-            }
-        }
-
-        // ---------- COMMAND ORCHESTRATION ----------
-        if (!cmdSender || !telemetry.heartbeat_received)
+        // ---------- Mission execution ----------
+        if (!cmdSender ||
+            !telemetry.isTelemetryReady() ||
+            commandManager.hasActiveCommand() ||
+            mission_step >= MISSION_LEN)
             continue;
 
-        // ----- ARM (single-shot intent, telemetry-gated) -----
-        if (!arm_intent_sent &&
-            telemetry.isTelemetryReady() &&
-            stateManager.getState() == SystemState::CONNECTED &&
-            !commandManager.hasActiveCommand()) {
-
-            bool accepted = commandManager.requestCommand(
-                VehicleCommand::ARM,
+        if (commandManager.requestCommand(
+                mission[mission_step],
                 stateManager.getState(),
-                telemetry
-            );
+                telemetry)) {
 
-            arm_intent_sent = true;  // latch intent ONCE telemetry is ready
+            cout << "[MISSION] Step "
+                 << mission_step
+                 << " issued\n";
 
-            if (accepted) {
-                std::cout << "[CMD] ARM requested" << std::endl;
-            }
+            mission_step++;
         }
-        //takeoff cmd
-        static bool takeoff_intent_sent = false;
-
-        if (stateManager.getState() == SystemState::ARMED &&
-            telemetry.isTelemetryReady() &&
-            !commandManager.hasActiveCommand() &&
-            !takeoff_intent_sent) {
-
-            bool accepted = commandManager.requestCommand(
-                VehicleCommand::TAKEOFF,
-                stateManager.getState(),
-                telemetry
-            );
-
-            if (accepted) {
-                takeoff_intent_sent = true;
-                std::cout << "[CMD] TAKEOFF requested" << std::endl;
-            }
-        }
-
-
-
     }
 
     return 0;

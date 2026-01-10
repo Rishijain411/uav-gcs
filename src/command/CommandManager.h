@@ -2,19 +2,23 @@
 
 #include <optional>
 #include <chrono>
+#include <iostream>
+
+using namespace std;
 
 #include "VehicleCommand.h"
 #include "core/SystemState.h"
 #include "telemetry/TelemetryData.h"
 
-class MavlinkCommandSender;  // forward declaration
+class MavlinkCommandSender;
 
 class CommandManager {
 public:
     bool isCommandAllowed(
         VehicleCommand cmd,
         SystemState state,
-        const TelemetryData& telemetry) const;
+        const TelemetryData& telemetry,
+        CommandBlockReason& out_reason) const;
 
     bool requestCommand(
         VehicleCommand cmd,
@@ -27,10 +31,6 @@ public:
 
     bool hasActiveCommand() const;
 
-    // ✅ Phase 4.2: lifecycle notification
-    bool commandFinished() const { return command_finished_; }
-    void clearCommandFinished() { command_finished_ = false; }
-
     void setCommandSender(MavlinkCommandSender* sender) {
         sender_ = sender;
     }
@@ -41,8 +41,7 @@ private:
         uint16_t mavlink_cmd_id;
         int retry_count = 0;
         int max_retries = 3;
-        bool awaiting_ack = true;
-        std::chrono::steady_clock::time_point last_sent_time;
+        chrono::steady_clock::time_point last_sent_time;
     };
 
     uint16_t mapToMavlinkCommand(VehicleCommand cmd) const;
@@ -51,12 +50,9 @@ private:
         const TelemetryData& telemetry,
         SystemState& state);
 
-    void handleRetry();
+    void handleRetry(const TelemetryData& telemetry);
 
-    std::optional<TrackedCommand> active_command_;
-
+    optional<TrackedCommand> active_command_;
     MavlinkCommandSender* sender_ = nullptr;
-
-    // ✅ ADD THIS LINE (THIS IS WHAT WAS MISSING)
-    bool command_finished_ = false;
+    CommandBlockReason last_logged_block_ = CommandBlockReason::NONE;
 };
