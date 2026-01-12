@@ -28,10 +28,10 @@ void GcsHeartbeat::send() {
     uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
 
     mavlink_msg_heartbeat_pack(
-        GCS_SYS_ID,
-        GCS_COMP_ID,
+        255,                                // sysid (GCS)
+        MAV_COMP_ID_MISSIONPLANNER,         // compid
         &msg,
-        MAV_TYPE_GCS,
+        MAV_TYPE_GCS,                       // THIS IS KEY
         MAV_AUTOPILOT_INVALID,
         0,
         0,

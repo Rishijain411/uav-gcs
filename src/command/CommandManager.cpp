@@ -1,6 +1,7 @@
 #include "command/CommandManager.h"
 #include "command/MavlinkCommandSender.h"
-
+#include "telemetry/TelemetryData.h"
+#include "utils/EnumStrings.h"
 #include <iostream>
 #include <chrono>
 
@@ -12,17 +13,62 @@ static CommandBlockReason last_printed_reason = CommandBlockReason::NONE;
 // -------------------------------------------------
 bool CommandManager::isCommandAllowed(
     VehicleCommand cmd,
-    SystemState state,
+    SystemState system_state,
+    mission::MissionState mission_state,
     const TelemetryData& telemetry,
     CommandBlockReason& out_reason) const {
 
     out_reason = CommandBlockReason::NONE;
 
-    if (state == SystemState::FAILSAFE) {
+    // ---------------------------
+    // MISSION AUTHORITY (PRD)
+    // ---------------------------
+    switch (cmd) {
+
+    case VehicleCommand::ARM:
+        if (mission_state != mission::MissionState::PREFLIGHT) {
+            out_reason = CommandBlockReason::MISSION_STATE_BLOCK;
+            return false;
+        }
+        break;
+
+    case VehicleCommand::TAKEOFF:
+        if (mission_state != mission::MissionState::ARMED) {
+            out_reason = CommandBlockReason::MISSION_STATE_BLOCK;
+            return false;
+        }
+        break;
+
+    case VehicleCommand::SET_MODE_AUTO:
+        if (mission_state != mission::MissionState::TRANSIT &&
+            mission_state != mission::MissionState::SEARCH) {
+            out_reason = CommandBlockReason::MISSION_STATE_BLOCK;
+            return false;
+        }
+        break;
+
+    case VehicleCommand::LAND:
+        if (mission_state != mission::MissionState::RTB) {
+            out_reason = CommandBlockReason::MISSION_STATE_BLOCK;
+            return false;
+        }
+        break;
+
+    default:
+        break;
+    }
+
+    // ---------------------------
+    // SYSTEM SAFETY (LOCAL)
+    // ---------------------------
+    if (system_state == SystemState::FAILSAFE) {
         out_reason = CommandBlockReason::FAILSAFE_ACTIVE;
         return false;
     }
 
+    // ---------------------------
+    // VEHICLE HEALTH (PX4 INPUT)
+    // ---------------------------
     switch (cmd) {
 
     case VehicleCommand::ARM:
@@ -38,14 +84,7 @@ bool CommandManager::isCommandAllowed(
             out_reason = CommandBlockReason::VEHICLE_NOT_LANDED;
             return false;
         }
-        if (telemetry.arm_state != ArmState::DISARMED) {
-            out_reason = CommandBlockReason::VEHICLE_NOT_ARMED;
-            return false;
-        }
         return true;
-
-    case VehicleCommand::SET_MODE_AUTO:
-        return telemetry.arm_state == ArmState::ARMED;
 
     case VehicleCommand::TAKEOFF:
         return telemetry.arm_state == ArmState::ARMED &&
@@ -59,33 +98,32 @@ bool CommandManager::isCommandAllowed(
     }
 }
 
+
 // -------------------------------------------------
 bool CommandManager::requestCommand(
     VehicleCommand cmd,
-    SystemState state,
+    SystemState system_state,
+    mission::MissionState mission_state,
     const TelemetryData& telemetry) {
 
     if (active_command_ || !sender_)
         return false;
 
-    const CommandDefinition* def = findCommand(cmd);
-    if (!def)
-        return false;
+    CommandBlockReason reason = CommandBlockReason::NONE;
 
-    if (!def->allowed(telemetry)) {
-        cout << "[CMD BLOCKED] Rule denied\n";
+    if (!isCommandAllowed(cmd, system_state, mission_state, telemetry, reason)) {
+        cout << "[CMD BLOCKED] reason=" << toString(reason) << endl;
         return false;
     }
 
+
     TrackedCommand tc;
     tc.logical_cmd = cmd;
-    tc.mavlink_cmd_id = def->mavlink_id;
-    tc.retry_count = 0;
-    tc.max_retries = 3;
+    tc.mavlink_cmd_id = mapToMavlinkCommand(cmd);
     tc.last_sent_time = chrono::steady_clock::now();
 
     sender_->sendRawCommand(tc.mavlink_cmd_id);
-    cout << "[CMD] " << tc.mavlink_cmd_id << " SENT\n";
+    cout << "[CMD SENT] mavlink_id=" << tc.mavlink_cmd_id << endl;
 
     active_command_ = tc;
     return true;
@@ -101,12 +139,13 @@ void CommandManager::update(
         return;
 
     handleAck(telemetry, state);
-    handleRetry(telemetry);  
+    handleRetry();
+
 }
 
 
 // -------------------------------------------------
-void CommandManager::handleRetry(const TelemetryData& telemetry) {
+void CommandManager::handleRetry() {
 
     if (!sender_ || !active_command_)
         return;
@@ -117,11 +156,11 @@ void CommandManager::handleRetry(const TelemetryData& telemetry) {
         chrono::duration_cast<chrono::milliseconds>(
             chrono::steady_clock::now() - cmd.last_sent_time).count();
 
-    if (elapsed < COMMAND_ACK_TIMEOUT_MS)
+    if (elapsed < 3000)
         return;
 
     if (cmd.retry_count >= cmd.max_retries) {
-        cout << "[CMD] TIMEOUT — giving up\n";
+        cout << "[CMD TIMEOUT] aborting\n";
         active_command_.reset();
         return;
     }
@@ -130,8 +169,9 @@ void CommandManager::handleRetry(const TelemetryData& telemetry) {
     cmd.last_sent_time = chrono::steady_clock::now();
     sender_->sendRawCommand(cmd.mavlink_cmd_id);
 
-    cout << "[CMD] RETRY " << cmd.retry_count << endl;
+    cout << "[CMD RETRY] count=" << cmd.retry_count << endl;
 }
+
 void CommandManager::handleAck(
     const TelemetryData& telemetry,
     SystemState& state) {

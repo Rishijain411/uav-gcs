@@ -166,23 +166,27 @@ void TelemetryParser::parse(uint8_t byte) {
 
     // ================= STATUSTEXT (LOGGING ONLY) =================
     case MAVLINK_MSG_ID_STATUSTEXT: {
-        mavlink_statustext_t st;
-        mavlink_msg_statustext_decode(&msg, &st);
+    mavlink_statustext_t st;
+    mavlink_msg_statustext_decode(&msg, &st);
+    std::cout << "[STATUSTEXT] " << st.text << std::endl;
 
-        std::strncpy(
-            telemetry.last_status_text,
-            reinterpret_cast<char*>(st.text),
-            sizeof(telemetry.last_status_text) - 1
-        );
+    strncpy(
+        telemetry.last_status_text,
+        st.text,
+        sizeof(telemetry.last_status_text) - 1);
 
-        telemetry.last_status_text[
-            sizeof(telemetry.last_status_text) - 1] = '\0';
+    telemetry.last_status_text[
+        sizeof(telemetry.last_status_text) - 1] = '\0';
 
-        std::cout << "[PX4] "
-                  << telemetry.last_status_text
-                  << std::endl;
+    // ---------------- PREFLIGHT OK DETECTION ----------------
+    if (strstr(st.text, "Ready for takeoff") ||
+        strstr(st.text, "Preflight check passed")) {
+        std::cout << "[TELEMETRY] Preflight OK confirmed\n";
+    }
+
         break;
     }
+
 
     default:
         break;

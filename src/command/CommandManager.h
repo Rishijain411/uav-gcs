@@ -3,12 +3,13 @@
 #include <optional>
 #include <chrono>
 #include <iostream>
-
+#include <string>
 using namespace std;
 
 #include "VehicleCommand.h"
 #include "core/SystemState.h"
 #include "telemetry/TelemetryData.h"
+#include "mission/MissionState.h"
 
 class MavlinkCommandSender;
 
@@ -16,18 +17,20 @@ class CommandManager {
 public:
     bool isCommandAllowed(
         VehicleCommand cmd,
-        SystemState state,
+        SystemState system_state,
+        mission::MissionState mission_state,
         const TelemetryData& telemetry,
         CommandBlockReason& out_reason) const;
 
     bool requestCommand(
         VehicleCommand cmd,
-        SystemState state,
+        SystemState system_state,
+        mission::MissionState mission_state,
         const TelemetryData& telemetry);
 
     void update(
         const TelemetryData& telemetry,
-        SystemState& state);
+        SystemState& system_state);
 
     bool hasActiveCommand() const;
 
@@ -48,11 +51,10 @@ private:
 
     void handleAck(
         const TelemetryData& telemetry,
-        SystemState& state);
+        SystemState& system_state);
 
-    void handleRetry(const TelemetryData& telemetry);
+    void handleRetry();
 
     optional<TrackedCommand> active_command_;
     MavlinkCommandSender* sender_ = nullptr;
-    CommandBlockReason last_logged_block_ = CommandBlockReason::NONE;
 };

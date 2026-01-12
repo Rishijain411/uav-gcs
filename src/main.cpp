@@ -11,8 +11,71 @@ using namespace std;
 #include "command/MavlinkCommandSender.h"
 #include "comm/GcsHeartbeat.h"
 
+#include "mission/Mission.h"
+#include "mission/MissionEvent.h"
+
+// Authority layers
+#include "authority/OperatorAuthorization.h"
+#include "authority/AuditLogger.h"
+#include "authority/MissionTransitionAuthority.h"
+
+// 🔹 NEW: Mission controller (Search + Engagement binding)
+#include "mission/MissionController.h"
+
 constexpr int HEARTBEAT_TIMEOUT_MS = 2000;
 
+// ------------------------------------------------------------
+// SAFE DISPATCH WRAPPER (OITL + AUDIT + COMMAND EXECUTION)
+// ------------------------------------------------------------
+bool dispatchCommand(
+    CommandManager& cmd_mgr,
+    VehicleCommand cmd,
+    SystemState system_state,
+    mission::MissionState mission_state,
+    const TelemetryData& telemetry)
+{
+    // -------- Operator Authorization --------
+    if (!OperatorAuthorization::hasPending()) {
+            OperatorAuthorization::request(cmd, mission_state);
+            return false;
+        }
+
+    auto decision = OperatorAuthorization::pollDecision();
+    if (!decision.has_value())
+        return false;
+
+    if (!decision.value()) {
+        cout << "[AUTH] Operator denied command\n";
+        return false;
+    }
+
+
+    // -------- Command Execution --------
+    bool ok = cmd_mgr.requestCommand(
+        cmd,
+        system_state,
+        mission_state,
+        telemetry);
+
+    if (ok) {
+        AuditLogger::logDecision(
+            cmd,
+            mission_state,
+            "EXECUTED");
+    } else {
+        AuditLogger::logDecision(
+            cmd,
+            mission_state,
+            "BLOCKED",
+            "CommandManager rejected");
+    }
+
+    return ok;
+}
+
+// ============================================================
+//                           MAIN
+// ============================================================
 int main() {
 
     UdpTransport udp;
@@ -20,6 +83,11 @@ int main() {
     StateManager stateManager;
     CommandManager commandManager;
     TelemetryParser parser(telemetry, stateManager);
+
+    mission::Mission mission;
+
+    // 🔹 NEW: Mission-level controller
+    MissionController missionController;
 
     if (!udp.start(14550)) {
         cerr << "Failed to start UDP transport\n";
@@ -38,18 +106,6 @@ int main() {
     bool sender_initialized = false;
 
     uint8_t buffer[2048];
-
-    // ---------------- Mission definition ----------------
-    static VehicleCommand mission[] = {
-        VehicleCommand::ARM,
-        VehicleCommand::SET_MODE_AUTO,
-        VehicleCommand::TAKEOFF
-    };
-
-    static constexpr int MISSION_LEN =
-        sizeof(mission) / sizeof(mission[0]);
-
-    static int mission_step = 0;
 
     // ================= MAIN LOOP =================
     while (true) {
@@ -80,6 +136,7 @@ int main() {
             );
             commandManager.setCommandSender(cmdSender);
             sender_initialized = true;
+            cout << "[GCS] Command sender initialized\n";
         }
 
         // ---------- FAILSAFE CHECK ----------
@@ -102,27 +159,82 @@ int main() {
                 stateManager.getState() != SystemState::FAILSAFE) {
 
                 stateManager.setState(SystemState::FAILSAFE);
+
+                AuditLogger::logDecision(
+                    VehicleCommand::NONE,
+                    mission.state(),
+                    "FAILSAFE",
+                    "MAVLink timeout");
+
                 cout << "[FAILSAFE] MAVLink timeout\n";
             }
         }
 
-        // ---------- Mission execution ----------
+        // ====================================================
+        //              MISSION AUTHORITY LOOP
+        // ====================================================
         if (!cmdSender ||
             !telemetry.isTelemetryReady() ||
-            commandManager.hasActiveCommand() ||
-            mission_step >= MISSION_LEN)
+            commandManager.hasActiveCommand())
             continue;
 
-        if (commandManager.requestCommand(
-                mission[mission_step],
+        // 🔹 NEW: Mission-level autonomy binding
+        missionController.update(mission, telemetry);
+
+        switch (mission.state()) {
+
+        case mission::MissionState::INIT:
+            MissionTransitionAuthority::requestTransition(
+                mission,
+                mission::MissionEvent::LOAD_MISSION);
+            break;
+
+        case mission::MissionState::PREFLIGHT:
+            if (telemetry.isPreflightReady()) {
+            MissionTransitionAuthority::requestTransition(
+                mission,
+                mission::MissionEvent::PREFLIGHT_OK);
+        }
+
+            break;
+
+        case mission::MissionState::ARMED:
+            dispatchCommand(
+                commandManager,
+                VehicleCommand::ARM,
                 stateManager.getState(),
-                telemetry)) {
+                mission.state(),
+                telemetry);
+            break;
 
-            cout << "[MISSION] Step "
-                 << mission_step
-                 << " issued\n";
+        case mission::MissionState::TRANSIT:
+            dispatchCommand(
+                commandManager,
+                VehicleCommand::SET_MODE_AUTO,
+                stateManager.getState(),
+                mission.state(),
+                telemetry);
+            break;
 
-            mission_step++;
+        case mission::MissionState::SEARCH:
+            // SearchPattern handled inside MissionController
+            break;
+
+        case mission::MissionState::ENGAGE:
+            // EngagementPolicy handled inside MissionController
+            break;
+
+        case mission::MissionState::RTB:
+            dispatchCommand(
+                commandManager,
+                VehicleCommand::LAND,
+                stateManager.getState(),
+                mission.state(),
+                telemetry);
+            break;
+
+        default:
+            break;
         }
     }
 

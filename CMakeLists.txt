@@ -5,6 +5,17 @@ project(my_gcs LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# =====================================================
+#                    GLOBAL INCLUDES
+# =====================================================
+include_directories(
+    ${PROJECT_SOURCE_DIR}/src
+    ${PROJECT_SOURCE_DIR}/third_party
+)
+
+# =====================================================
+#                    MAIN GCS TARGET
+# =====================================================
 add_executable(my_gcs
     src/main.cpp
 
@@ -21,10 +32,41 @@ add_executable(my_gcs
     # ---------------- Command ----------------
     src/command/CommandManager.cpp
     src/command/MavlinkCommandSender.cpp
-    # src/command/CommandTable.cpp        # ← ADD THIS WHEN YOU CREATE IT
+    src/command/CommandTable.cpp
+
+    # ---------------- Mission ----------------
+    src/mission/Mission.cpp
+    src/mission/MissionController.cpp
+
+    # ---------------- Mission Logic ----------------
+    src/mission/search/ExpandingSquarePattern.cpp
+    src/mission/engagement/EngagementPolicy.cpp
 )
 
-target_include_directories(my_gcs PRIVATE
-    ${PROJECT_SOURCE_DIR}/src
-    ${PROJECT_SOURCE_DIR}/third_party
+# =====================================================
+#                    TEST TARGETS
+# =====================================================
+
+# ---- Mission State Machine Test ----
+add_executable(test_mission_state
+    src/test/test_mission_state.cpp
+    src/mission/Mission.cpp
+)
+
+# ---- Mission Transition Authority Test ----
+add_executable(test_mission_transition
+    src/test/test_mission_transition.cpp
+    src/mission/Mission.cpp
+)
+
+# ---- Search Pattern Test ----
+add_executable(test_search_pattern
+    src/test/test_search_pattern.cpp
+    src/mission/search/ExpandingSquarePattern.cpp
+)
+
+# ---- Engagement Policy Test ----
+add_executable(test_engagement_policy
+    src/test/test_engagement_policy.cpp
+    src/mission/engagement/EngagementPolicy.cpp
 )

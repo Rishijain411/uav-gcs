@@ -13,6 +13,7 @@ struct CommandAckData {
     uint8_t result = MAV_RESULT_FAILED;
     bool valid = false;
 };
+
 enum class ArmState {
     DISARMED,
     ARMED
@@ -27,6 +28,7 @@ enum class NavState {
     AUTO_LAND,
     UNKNOWN
 };
+
 enum class FlightPhase {
     UNKNOWN,
     ON_GROUND,
@@ -35,16 +37,38 @@ enum class FlightPhase {
     LANDING
 };
 
+/* ---------- Command Block Reasons ---------- */
 enum class CommandBlockReason {
     NONE,
+    FAILSAFE_ACTIVE,
     EKF_NOT_READY,
     BATTERY_LOW,
-    FAILSAFE_ACTIVE,
-    VEHICLE_NOT_ARMED,
     VEHICLE_NOT_LANDED,
-    UNKNOWN
+    VEHICLE_NOT_ARMED,
+    MISSION_STATE_BLOCK
 };
 
+/* ---------- Human-readable mapping (AUDIT SAFE) ---------- */
+inline const char* toString(CommandBlockReason reason) {
+    switch (reason) {
+    case CommandBlockReason::NONE:
+        return "NONE";
+    case CommandBlockReason::FAILSAFE_ACTIVE:
+        return "FAILSAFE_ACTIVE";
+    case CommandBlockReason::EKF_NOT_READY:
+        return "EKF_NOT_READY";
+    case CommandBlockReason::BATTERY_LOW:
+        return "BATTERY_LOW";
+    case CommandBlockReason::VEHICLE_NOT_LANDED:
+        return "VEHICLE_NOT_LANDED";
+    case CommandBlockReason::VEHICLE_NOT_ARMED:
+        return "VEHICLE_NOT_ARMED";
+    case CommandBlockReason::MISSION_STATE_BLOCK:
+        return "MISSION_STATE_BLOCK";
+    default:
+        return "UNKNOWN_BLOCK_REASON";
+    }
+}
 
 struct TelemetryData {
 
@@ -73,18 +97,34 @@ struct TelemetryData {
     FlightPhase flight_phase = FlightPhase::UNKNOWN;
     bool extended_state_received = false;
 
-    // ✅ Phase 5: WHY command is blocked
+    // ---------- Phase 5: Last Command Block Reason ----------
     CommandBlockReason last_block_reason =
         CommandBlockReason::NONE;
-    // ---------- Phase 5: STATUSTEXT ----------
-    bool preflight_ok = false;
-    std::chrono::steady_clock::time_point last_preflight_clear_time;
 
-    // Last human-readable reason from PX4
+    // ---------- Preflight Readiness (Derived, Authoritative) ----------
+    bool isPreflightReady() const {
+        return
+            heartbeat_received &&
+            ekf_received &&
+            ekf_ok &&
+            battery_received &&
+            battery_ok &&
+            extended_state_received &&
+            !in_failsafe &&
+            arm_state == ArmState::DISARMED &&
+            flight_phase == FlightPhase::ON_GROUND;
+    }
+
+    // ---------- Last PX4 status text ----------
     char last_status_text[50] = {0};
 
+    // ---------- Target / Engagement Telemetry ----------
+    bool target_detected = false;
+    double target_confidence = 0.0;
+    double target_range_m = 0.0;
+    double target_closing_speed = 0.0;
 
-    // ---------- Derived ----------
+    // ---------- Derived Helpers ----------
     bool isTelemetryReady() const {
         return heartbeat_received &&
                ekf_received &&
@@ -100,5 +140,3 @@ struct TelemetryData {
         return flight_phase == FlightPhase::ON_GROUND;
     }
 };
-
-
