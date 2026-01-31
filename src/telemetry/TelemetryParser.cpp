@@ -51,6 +51,15 @@ void TelemetryParser::parse(uint8_t byte) {
             (hb.base_mode & MAV_MODE_FLAG_SAFETY_ARMED)
                 ? ArmState::ARMED
                 : ArmState::DISARMED;
+        
+        // DEBUG: Print heartbeat details MORE FREQUENTLY to catch ARM transitions
+        static int hb_counter = 0;
+        if (++hb_counter % 10 == 0) {  // Print every 10 heartbeats (~1 second)
+            std::cout << "[HB_DEBUG] base_mode=0x" << std::hex << (int)hb.base_mode << std::dec
+                 << " ARMED_FLAG=" << (int)(hb.base_mode & MAV_MODE_FLAG_SAFETY_ARMED)
+                 << " arm_state=" << (int)telemetry.arm_state 
+                 << " custom_mode=" << hb.custom_mode << "\n";
+        }
 
         // ---- FAILSAFE ----
         telemetry.in_failsafe =

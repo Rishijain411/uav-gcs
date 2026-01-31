@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <unistd.h>
+#include <iostream>
 
 extern "C" {
 #include "mavlink/common/mavlink.h"
@@ -28,11 +29,11 @@ void GcsHeartbeat::send() {
     uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
 
     mavlink_msg_heartbeat_pack(
-        255,                                // sysid (GCS)
+        250,                                // sysid (GCS) - MUST match command sender
         MAV_COMP_ID_MISSIONPLANNER,         // compid
         &msg,
         MAV_TYPE_GCS,                       // THIS IS KEY
-        MAV_AUTOPILOT_INVALID,
+        MAV_AUTOPILOT_GENERIC,              // Changed from INVALID
         0,
         0,
         MAV_STATE_ACTIVE
@@ -40,7 +41,7 @@ void GcsHeartbeat::send() {
 
     uint16_t len = mavlink_msg_to_send_buffer(buffer, &msg);
 
-    sendto(
+    ssize_t sent = sendto(
         sockfd,
         buffer,
         len,
@@ -48,4 +49,14 @@ void GcsHeartbeat::send() {
         reinterpret_cast<sockaddr*>(&target_addr),
         sizeof(target_addr)
     );
+
+    static int hb_send_counter = 0;
+    if (++hb_send_counter % 10 == 0) {  // Debug every 10 sends
+        std::cout << "[GCS_HB] Sent " << sent << " bytes to 127.0.0.1:18570 (sysid=250)\n";
+        std::cout.flush();
+    }
+
+    if (sent < 0) {
+        perror("[GCS_HB] sendto failed");
+    }
 }

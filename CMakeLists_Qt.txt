@@ -1,0 +1,107 @@
+# Qt-enabled CMake configuration for GCS-Vyuha
+# To use: Copy this to CMakeLists.txt or merge with existing one
+
+cmake_minimum_required(VERSION 3.16)
+project(GCS_Vyuha_UI VERSION 1.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Qt configuration
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+set(CMAKE_AUTOUIC ON)
+
+# Find Qt6 (fallback to Qt5 if Qt6 not found)
+find_package(Qt6 COMPONENTS Widgets QUIET)
+if(NOT Qt6_FOUND)
+    find_package(Qt5 COMPONENTS Widgets REQUIRED)
+    set(QT_VERSION_MAJOR 5)
+else()
+    set(QT_VERSION_MAJOR 6)
+endif()
+
+# Include directories
+include_directories(
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/third_party/mavlink
+    ${CMAKE_SOURCE_DIR}/third_party/mavlink/common
+)
+
+# Source files for UI application
+set(UI_SOURCES
+    src/ui/main_ui.cpp
+    src/ui/MainWindow.cpp
+    src/ui/MainWindow.h
+    
+    # Include core GCS files
+    src/comm/UdpTransport.cpp
+    src/comm/GcsHeartbeat.cpp
+    src/telemetry/TelemetryParser.cpp
+    src/core/StateManager.cpp
+    src/command/CommandManager.cpp
+    src/command/CommandTable.cpp
+    src/command/MavlinkCommandSender.cpp
+    src/mission/Mission.cpp
+    src/mission/MissionController.cpp
+    src/mission/search/ExpandingSquarePattern.cpp
+    src/mission/engagement/EngagementPolicy.cpp
+)
+
+# Qt UI executable
+add_executable(gcs_ui ${UI_SOURCES})
+
+# Link Qt libraries
+if(QT_VERSION_MAJOR EQUAL 6)
+    target_link_libraries(gcs_ui PRIVATE Qt6::Widgets)
+else()
+    target_link_libraries(gcs_ui PRIVATE Qt5::Widgets)
+endif()
+
+# Enable testing (keep existing tests)
+enable_testing()
+
+# Test executables (console-only, no Qt)
+add_executable(test_mission_state src/test/test_mission_state.cpp src/mission/Mission.cpp)
+add_executable(test_mission_transition src/test/test_mission_transition.cpp src/mission/Mission.cpp)
+add_executable(test_search_pattern src/test/test_search_pattern.cpp src/mission/search/ExpandingSquarePattern.cpp)
+add_executable(test_engagement_policy src/test/test_engagement_policy.cpp src/mission/engagement/EngagementPolicy.cpp src/mission/Mission.cpp)
+
+# Register tests
+add_test(NAME MissionStateTest COMMAND test_mission_state)
+add_test(NAME MissionTransitionTest COMMAND test_mission_transition)
+add_test(NAME SearchPatternTest COMMAND test_search_pattern)
+add_test(NAME EngagementPolicyTest COMMAND test_engagement_policy)
+
+# Install
+install(TARGETS gcs_ui DESTINATION bin)
+
+# Platform-specific settings
+if(WIN32)
+    # Windows: Deploy Qt DLLs
+    if(QT_VERSION_MAJOR EQUAL 6)
+        get_target_property(_qmake_executable Qt6::qmake IMPORTED_LOCATION)
+    else()
+        get_target_property(_qmake_executable Qt5::qmake IMPORTED_LOCATION)
+    endif()
+    get_filename_component(_qt_bin_dir "${_qmake_executable}" DIRECTORY)
+    find_program(WINDEPLOYQT_EXECUTABLE windeployqt HINTS "${_qt_bin_dir}")
+    
+    add_custom_command(TARGET gcs_ui POST_BUILD
+        COMMAND "${WINDEPLOYQT_EXECUTABLE}" --no-compiler-runtime "$<TARGET_FILE:gcs_ui>"
+        COMMENT "Running windeployqt..."
+    )
+endif()
+
+# macOS: Create app bundle
+if(APPLE)
+    set_target_properties(gcs_ui PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_GUI_IDENTIFIER com.vyuha.gcs
+        MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
+        MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
+    )
+endif()
+
+message(STATUS "Qt version: ${QT_VERSION_MAJOR}")
+message(STATUS "Building GCS UI with Qt support")

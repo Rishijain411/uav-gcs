@@ -7,6 +7,8 @@ extern "C" {
 #include "mavlink/common/mavlink.h"
 }
 
+struct GeoPoint;
+
 class MavlinkCommandSender {
 public:
     // ✔ PX4-correct constructor
@@ -19,6 +21,9 @@ public:
     void sendTakeoff(float altitude_m);
     void sendLand();
     void sendSetModeAuto();
+
+    // Phase C: Search waypoint
+    void sendSearchWaypoint(const GeoPoint& waypoint);
 
     // ---------- Generic command interface (Phase 4 / 5) ----------
     void sendRawCommand(uint16_t command) {

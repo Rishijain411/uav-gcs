@@ -4,10 +4,19 @@
 namespace mission {
 
 Mission::Mission()
-    : current_state_(MissionState::INIT) {}
+    : current_state_(MissionState::INIT),
+      bit_status_() {}
 
 MissionState Mission::state() const {
     return current_state_;
+}
+
+bool Mission::isStateNewlyEntered() const {
+    return state_just_changed_;
+}
+
+void Mission::markStateHandled() {
+    state_just_changed_ = false;
 }
 
 bool Mission::apply_event(MissionEvent event) {
@@ -16,6 +25,7 @@ bool Mission::apply_event(MissionEvent event) {
     }
 
     current_state_ = transition(current_state_, event);
+    state_just_changed_ = true;  // NEW: Mark that we just transitioned
     return true;
 }
 
@@ -66,6 +76,22 @@ MissionState Mission::transition(MissionState state, MissionEvent event) {
     }
 
     return MissionState::ABORTED;
+}
+
+bool Mission::loadProfile(const MissionProfile& profile) {
+    if (!profile.isValid()) {
+        return false;
+    }
+    profile_ = profile;
+    return true;
+}
+
+bool Mission::hasValidProfile() const {
+    return profile_.has_value() && profile_.value().isValid();
+}
+
+const MissionProfile& Mission::getProfile() const {
+    return profile_.value();
 }
 
 } // namespace mission

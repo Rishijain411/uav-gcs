@@ -41,6 +41,8 @@ public:
             }
 
             if (!decision.value()) {
+                OperatorAuthorization::consumeDecision();  // NEW: Mark decision as consumed
+                
                 AuditLogger::logMissionTransition(
                     from_state,
                     event,
@@ -58,6 +60,8 @@ public:
         bool ok = mission.apply_event(event);
 
         if (ok) {
+            OperatorAuthorization::consumeDecision();  // NEW: Mark decision as consumed
+            
             AuditLogger::logMissionTransition(
                 from_state,
                 event,

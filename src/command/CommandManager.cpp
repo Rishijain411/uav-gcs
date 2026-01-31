@@ -26,7 +26,9 @@ bool CommandManager::isCommandAllowed(
     switch (cmd) {
 
     case VehicleCommand::ARM:
-        if (mission_state != mission::MissionState::PREFLIGHT) {
+        // ARM allowed in PREFLIGHT (before transition) or ARMED (after transition but before actual arm)
+        if (mission_state != mission::MissionState::PREFLIGHT &&
+            mission_state != mission::MissionState::ARMED) {
             out_reason = CommandBlockReason::MISSION_STATE_BLOCK;
             return false;
         }
@@ -72,6 +74,11 @@ bool CommandManager::isCommandAllowed(
     switch (cmd) {
 
     case VehicleCommand::ARM:
+        // Don't ARM if already armed
+        if (telemetry.arm_state == ArmState::ARMED) {
+            out_reason = CommandBlockReason::VEHICLE_NOT_ARMED;  // Reusing enum, but means "already armed"
+            return false;
+        }
         if (!telemetry.ekf_ok) {
             out_reason = CommandBlockReason::EKF_NOT_READY;
             return false;
@@ -89,6 +96,14 @@ bool CommandManager::isCommandAllowed(
     case VehicleCommand::TAKEOFF:
         return telemetry.arm_state == ArmState::ARMED &&
                telemetry.isLanded();
+
+    case VehicleCommand::SET_MODE_AUTO:
+        // SET_MODE_AUTO requires vehicle to be armed
+        if (telemetry.arm_state != ArmState::ARMED) {
+            out_reason = CommandBlockReason::VEHICLE_NOT_ARMED;
+            return false;
+        }
+        return true;
 
     case VehicleCommand::LAND:
         return telemetry.isAirborne();
@@ -234,4 +249,19 @@ uint16_t CommandManager::mapToMavlinkCommand(
 
 bool CommandManager::hasActiveCommand() const {
     return active_command_.has_value();
+}
+// -------------------------------------------------
+// Phase C: Search waypoint publishing
+// -------------------------------------------------
+void CommandManager::sendSearchWaypoint(const GeoPoint& waypoint) {
+    if (!sender_) {
+        cout << "[SEARCH WP] No command sender available\n";
+        return;
+    }
+
+    cout << "[SEARCH WP] Sending waypoint: lat=" << waypoint.lat
+         << " lon=" << waypoint.lon
+         << " alt=" << waypoint.alt << "\n";
+
+    sender_->sendSearchWaypoint(waypoint);
 }

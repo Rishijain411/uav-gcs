@@ -4,12 +4,14 @@
 #include <chrono>
 #include <iostream>
 #include <string>
+#include <vector>
 using namespace std;
 
 #include "VehicleCommand.h"
 #include "core/SystemState.h"
 #include "telemetry/TelemetryData.h"
 #include "mission/MissionState.h"
+#include "mission/search/SearchPattern.h"
 
 class MavlinkCommandSender;
 
@@ -33,6 +35,9 @@ public:
         SystemState& system_state);
 
     bool hasActiveCommand() const;
+
+    // Phase C: Search waypoint publishing
+    void sendSearchWaypoint(const GeoPoint& waypoint);
 
     void setCommandSender(MavlinkCommandSender* sender) {
         sender_ = sender;

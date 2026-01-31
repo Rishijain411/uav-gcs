@@ -1,11 +1,17 @@
 #include "MissionController.h"
+#include "command/CommandManager.h"
 
 // 🔹 REAL definition lives here
 #include "telemetry/TelemetryData.h"
+#include <chrono>
 
 
 MissionController::MissionController()
-    : engagement_policy_(3) // PRD: predefined N attempts
+    : engagement_policy_([]{
+        EngagementConfig cfg;
+        cfg.max_reengagement_attempts = 3;
+        return cfg;
+    }()) // PRD: predefined N attempts
 {
     // Search centered on launch (example)
     GeoPoint center { 0.0, 0.0, 50.0 };
@@ -22,6 +28,9 @@ void MissionController::update(
     mission::Mission& mission,
     const TelemetryData& telemetry)
 {
+    // Track state entry/exit for autonomy behaviors
+    const auto current_state = mission.state();
+
     switch (mission.state()) {
 
     case mission::MissionState::SEARCH:
@@ -35,13 +44,35 @@ void MissionController::update(
     default:
         break;
     }
+
+    last_state_ = current_state;
 }
 void MissionController::handleSearch(
     mission::Mission& mission,
     const TelemetryData& telemetry)
 {
+    const auto now = std::chrono::steady_clock::now();
+
+    // Reset pattern and scheduling when we ENTER SEARCH
+    if (last_state_ != mission::MissionState::SEARCH) {
+        search_pattern_->reset();
+        next_search_gen_time_ = now; // generate immediately on entry
+        cout << "[SEARCH] Entered SEARCH: pattern reset\n";
+
+        // Phase C: Request AUTO mode on SEARCH entry
+        if (cmd_manager_) {
+            cout << "[SEARCH] Requesting SET_MODE_AUTO for autonomous search\n";
+            cmd_manager_->requestCommand(
+                VehicleCommand::SET_MODE_AUTO,
+                SystemState::ARMED,
+                mission::MissionState::SEARCH,
+                telemetry);
+        }
+    }
+
     // Example hook: AI / radar later
     if (telemetry.target_detected) {
+        cout << "[SEARCH] Target detected -> requesting transition to ENGAGE\n";
 
         MissionTransitionAuthority::requestTransition(
             mission,
@@ -65,12 +96,28 @@ void MissionController::handleSearch(
         return;
     }
 
-    // Generate next intent (not sent yet)
+    // Generate next intent periodically (not sent yet)
+    if (now < next_search_gen_time_)
+        return;
+
+    next_search_gen_time_ = now + search_gen_interval_;
     auto points = search_pattern_->next();
 
     cout << "[SEARCH] Generated "
          << points.size()
          << " search waypoint(s)\n";
+
+    // Print and send the waypoints
+    for (const auto& p : points) {
+        cout << "  wp: lat=" << p.lat
+             << " lon=" << p.lon
+             << " alt=" << p.alt << "\n";
+
+        // Phase C: Send to vehicle via CommandManager
+        if (cmd_manager_) {
+            cmd_manager_->sendSearchWaypoint(p);
+        }
+    }
 }
 
 

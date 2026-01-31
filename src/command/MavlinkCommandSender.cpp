@@ -1,4 +1,5 @@
 #include "command/MavlinkCommandSender.h"
+#include "mission/search/SearchPattern.h"
 
 #include <arpa/inet.h>
 #include <cstring>
@@ -74,7 +75,8 @@ void MavlinkCommandSender::sendCommand(
 // High-level helpers (NO CHANGE)
 // --------------------------------------------------
 void MavlinkCommandSender::sendArm() {
-    sendCommand(MAV_CMD_COMPONENT_ARM_DISARM, 1.0f);
+    // param1=1 to arm, param2=21196 to force (bypass pre-arm checks)
+    sendCommand(MAV_CMD_COMPONENT_ARM_DISARM, 1.0f, 21196.0f);
 }
 
 void MavlinkCommandSender::sendDisarm() {
@@ -99,4 +101,53 @@ void MavlinkCommandSender::sendSetModeAuto() {
         MAV_MODE_AUTO_ARMED,
         0
     );
+}
+// --------------------------------------------------
+// Phase C: Send search waypoint via SET_POSITION_TARGET_GLOBAL_INT
+// --------------------------------------------------
+void MavlinkCommandSender::sendSearchWaypoint(const GeoPoint& waypoint) {
+    mavlink_message_t msg;
+    uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
+
+    // Convert lat/lon to int32_t (1e7 scale)
+    int32_t lat_int = (int32_t)(waypoint.lat * 1e7);
+    int32_t lon_int = (int32_t)(waypoint.lon * 1e7);
+    float alt_m = waypoint.alt;
+
+    // SET_POSITION_TARGET_GLOBAL_INT: immediate waypoint setpoint
+    mavlink_msg_set_position_target_global_int_pack(
+        GCS_SYS_ID,
+        GCS_COMP_ID,
+        &msg,
+        0,                              // time_boot_ms
+        target_sysid,                   // target_system
+        MAV_COMP_ID_AUTOPILOT1,         // target_component
+        MAV_FRAME_GLOBAL_RELATIVE_ALT,  // coordinate frame (relative to home alt)
+        0b0000111111000111,             // type_mask: only lat/lon/alt, ignore velocity/acceleration
+        lat_int,                        // lat (1e7)
+        lon_int,                        // lon (1e7)
+        alt_m,                          // alt (meters)
+        0, 0, 0,                        // vx, vy, vz (unused)
+        0, 0, 0,                        // afx, afy, afz (unused)
+        0, 0                            // yaw, yaw_rate (unused)
+    );
+
+    uint16_t len = mavlink_msg_to_send_buffer(buffer, &msg);
+    ssize_t sent = sendto(
+        sockfd,
+        buffer,
+        len,
+        0,
+        reinterpret_cast<sockaddr*>(&px4_addr),
+        sizeof(px4_addr)
+    );
+
+    if (sent < 0) {
+        perror("[GCS] sendto waypoint failed");
+    } else {
+        cout << "[WAYPOINT SENT] lat=" << waypoint.lat
+             << " lon=" << waypoint.lon
+             << " alt=" << waypoint.alt
+             << " bytes=" << sent << "\n";
+    }
 }

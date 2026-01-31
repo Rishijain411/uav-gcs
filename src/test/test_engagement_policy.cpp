@@ -5,7 +5,9 @@ using namespace std;
 #include "mission/engagement/EngagementPolicy.h"
 
 int main() {
-    EngagementPolicy policy(2);
+    EngagementConfig config;
+    config.max_reengagement_attempts = 2;
+    EngagementPolicy policy(config);
 
     TargetTrack weak {true, 0.6, 500, 20};
     TargetTrack strong {true, 0.95, 300, 30};

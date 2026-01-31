@@ -1,0 +1,29 @@
+{
+  "target_id": "TARGET_001",
+  "search_area": {
+    "vertices": [
+      [37.7749, -122.4194, 50.0],
+      [37.7750, -122.4190, 50.0],
+      [37.7755, -122.4190, 50.0],
+      [37.7754, -122.4194, 50.0]
+    ],
+    "min_altitude_m": 30.0,
+    "max_altitude_m": 100.0
+  },
+  "waypoints": [
+    [37.7749, -122.4194, 50.0],
+    [37.7750, -122.4190, 60.0],
+    [37.7755, -122.4190, 70.0]
+  ],
+  "payload_policy": {
+    "type": "KINETIC",
+    "arm_on_engagement": true,
+    "arming_delay_seconds": 2.0
+  },
+  "failsafe_rules": {
+    "comms_loss": "RTL",
+    "low_battery": "RTL",
+    "gps_jamming": "LAND"
+  }
+}
+
