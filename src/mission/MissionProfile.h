@@ -3,7 +3,8 @@
 #include <string>
 #include <vector>
 #include <optional>
-#include "SearchPattern.h"  // For GeoPoint
+// NEW:
+#include "mission/search/SearchPattern.h"
 
 namespace mission {
 
