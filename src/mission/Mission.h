@@ -4,6 +4,7 @@
 #include "MissionEvent.h"
 #include "MissionProfile.h"
 #include <optional>
+#include "mission/MissionAbortReason.h"
 
 namespace mission {
 
@@ -35,7 +36,11 @@ public:
         bool allPassed() const {
             return motors_ok && battery_ok && mavlink_ok && payload_ok;
         }
+
     };
+    void setAbortReason(MissionAbortReason reason);
+    MissionAbortReason getAbortReason() const;
+
     
     BitStatus getBitStatus() const { return bit_status_; }
     void setBitStatus(const BitStatus& status) { bit_status_ = status; }
@@ -49,6 +54,8 @@ private:
     
     // Phase B: Pre-Flight BIT
     BitStatus bit_status_;
+    MissionAbortReason abort_reason_ = MissionAbortReason::NONE;
+
 
     MissionState transition(MissionState state, MissionEvent event);
 };

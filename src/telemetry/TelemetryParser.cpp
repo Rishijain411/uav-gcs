@@ -1,7 +1,6 @@
 #include "telemetry/TelemetryParser.h"
 #include "telemetry/TelemetryData.h"
 #include "core/StateManager.h"
-
 #include <iostream>
 #include <chrono>
 #include <cstring>
@@ -31,54 +30,62 @@ void TelemetryParser::parse(uint8_t byte) {
 
     switch (msg.msgid) {
 
+
     // ================= HEARTBEAT =================
     case MAVLINK_MSG_ID_HEARTBEAT: {
         mavlink_heartbeat_t hb;
         mavlink_msg_heartbeat_decode(&msg, &hb);
 
-        // ❌ Ignore our own GCS heartbeat
+        // Ignore our own GCS heartbeat
         if (msg.sysid == GCS_SYS_ID)
             break;
 
         telemetry.system_id = msg.sysid;
         telemetry.component_id = msg.compid;
         telemetry.heartbeat_received = true;
-        telemetry.last_heartbeat_time =
-            std::chrono::steady_clock::now();
+        telemetry.last_heartbeat_time = std::chrono::steady_clock::now();
 
         // ---- ARM STATE ----
         telemetry.arm_state =
             (hb.base_mode & MAV_MODE_FLAG_SAFETY_ARMED)
                 ? ArmState::ARMED
                 : ArmState::DISARMED;
-        
-        // DEBUG: Print heartbeat details MORE FREQUENTLY to catch ARM transitions
-        static int hb_counter = 0;
-        if (++hb_counter % 10 == 0) {  // Print every 10 heartbeats (~1 second)
-            std::cout << "[HB_DEBUG] base_mode=0x" << std::hex << (int)hb.base_mode << std::dec
-                 << " ARMED_FLAG=" << (int)(hb.base_mode & MAV_MODE_FLAG_SAFETY_ARMED)
-                 << " arm_state=" << (int)telemetry.arm_state 
-                 << " custom_mode=" << hb.custom_mode << "\n";
+
+        // ---- NAV STATE (PX4 – SAFE DECODE) ----
+        uint8_t main_mode = (hb.custom_mode >> 16) & 0xFF;
+
+        switch (main_mode) {
+        case 1: // PX4_CUSTOM_MAIN_MODE_MANUAL
+            telemetry.nav_state = NavState::MANUAL;
+            break;
+        case 3: // PX4_CUSTOM_MAIN_MODE_POSCTL
+            telemetry.nav_state = NavState::POSCTL;
+            break;
+        case 4: // PX4_CUSTOM_MAIN_MODE_AUTO
+            telemetry.nav_state = NavState::AUTO_MISSION;
+            break;
+        default:
+            telemetry.nav_state = NavState::UNKNOWN;
+            break;
         }
 
         // ---- FAILSAFE ----
         telemetry.in_failsafe =
             (hb.system_status == MAV_STATE_CRITICAL ||
-             hb.system_status == MAV_STATE_EMERGENCY);
+            hb.system_status == MAV_STATE_EMERGENCY);
 
         if (telemetry.in_failsafe) {
-            telemetry.last_block_reason =
-                CommandBlockReason::FAILSAFE_ACTIVE;
+            telemetry.last_block_reason = CommandBlockReason::FAILSAFE_ACTIVE;
         }
 
         if (stateManager.getState() == SystemState::DISCONNECTED) {
             stateManager.setState(SystemState::CONNECTED);
         }
 
-        std::cout << "[HEARTBEAT] Vehicle detected (SysID "
-                  << int(msg.sysid) << ")" << std::endl;
         break;
     }
+
+
 
     // ================= BATTERY =================
     case MAVLINK_MSG_ID_SYS_STATUS: {

@@ -23,12 +23,40 @@ MissionController::MissionController()
         8        // max legs
     );
 }
-
 void MissionController::update(
     mission::Mission& mission,
     const TelemetryData& telemetry)
 {
-    // Track state entry/exit for autonomy behaviors
+    // --------------------------------------------------
+    // PRD: Abort on command timeout
+    // --------------------------------------------------
+    if (cmd_manager_ && cmd_manager_->hasCommandTimedOut()) {
+
+        std::cout << "[MISSION ABORT] Reason: COMMAND_TIMEOUT\n";
+
+        MissionTransitionAuthority::requestTransition(
+            mission,
+            mission::MissionEvent::SYSTEM_FAILURE,
+            MissionAbortReason::COMMAND_TIMEOUT,
+            "Command retry limit exceeded");
+
+        return;
+    }
+
+    // --------------------------------------------------
+    // PRD: Explicit FAILSAFE abort (not silent freeze)
+    // --------------------------------------------------
+    if (telemetry.in_failsafe) {
+
+        MissionTransitionAuthority::requestTransition(
+            mission,
+            mission::MissionEvent::SYSTEM_FAILURE,
+            MissionAbortReason::FAILSAFE_TRIGGERED,
+            telemetry.last_status_text);
+
+        return;
+    }
+
     const auto current_state = mission.state();
 
     switch (mission.state()) {
@@ -47,6 +75,7 @@ void MissionController::update(
 
     last_state_ = current_state;
 }
+
 void MissionController::handleSearch(
     mission::Mission& mission,
     const TelemetryData& telemetry)
@@ -91,7 +120,9 @@ void MissionController::handleSearch(
 
         MissionTransitionAuthority::requestTransition(
             mission,
-            mission::MissionEvent::SYSTEM_FAILURE); // or RTB
+            mission::MissionEvent::SYSTEM_FAILURE,
+            MissionAbortReason::SEARCH_EXHAUSTED,
+            "Search pattern exhausted");
 
         return;
     }
@@ -152,11 +183,23 @@ void MissionController::handleEngage(
 
         if (!auth_decision.value()) {
             cout << "[ENGAGE] Operator denied engagement completion\n";
+
+            MissionTransitionAuthority::requestTransition(
+                mission,
+                mission::MissionEvent::SYSTEM_FAILURE,
+                MissionAbortReason::OPERATOR_DENIED,
+                "Operator denied engagement");
+
             return;
         }
 
-        // Authorization granted → proceed as ENGAGE
+        // ✅ OPERATOR APPROVED — ENTER ENGAGE FSM STATE
+        MissionTransitionAuthority::requestTransition(
+            mission,
+            mission::MissionEvent::OPERATOR_ENGAGE_CONFIRM);
+
         decision = EngagementDecision::ENGAGE;
+
     }
 
     // --------------------------------------------------

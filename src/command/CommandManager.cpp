@@ -4,6 +4,7 @@
 #include "utils/EnumStrings.h"
 #include <iostream>
 #include <chrono>
+#include "mission/MissionAbortReason.h"
 
 using namespace std;
 
@@ -74,36 +75,38 @@ bool CommandManager::isCommandAllowed(
     switch (cmd) {
 
     case VehicleCommand::ARM:
-        // Don't ARM if already armed
-        if (telemetry.arm_state == ArmState::ARMED) {
-            out_reason = CommandBlockReason::VEHICLE_NOT_ARMED;  // Reusing enum, but means "already armed"
-            return false;
-        }
-        if (!telemetry.ekf_ok) {
-            out_reason = CommandBlockReason::EKF_NOT_READY;
-            return false;
-        }
-        if (!telemetry.battery_ok) {
-            out_reason = CommandBlockReason::BATTERY_LOW;
-            return false;
-        }
-        if (!telemetry.isLanded()) {
-            out_reason = CommandBlockReason::VEHICLE_NOT_LANDED;
-            return false;
-        }
-        return true;
+    // Don't ARM if already armed
+    if (telemetry.arm_state == ArmState::ARMED) {
+        out_reason = CommandBlockReason::VEHICLE_NOT_ARMED; // already armed
+        return false;
+    }
+
+    // ✅ Single authoritative preflight gate
+    if (!telemetry.isPreflightReady()) {
+        out_reason = telemetry.last_block_reason;
+        return false;
+    }
+
+    return true;
 
     case VehicleCommand::TAKEOFF:
         return telemetry.arm_state == ArmState::ARMED &&
                telemetry.isLanded();
 
     case VehicleCommand::SET_MODE_AUTO:
-        // SET_MODE_AUTO requires vehicle to be armed
-        if (telemetry.arm_state != ArmState::ARMED) {
-            out_reason = CommandBlockReason::VEHICLE_NOT_ARMED;
-            return false;
-        }
-        return true;
+    if (telemetry.arm_state != ArmState::ARMED) {
+        out_reason = CommandBlockReason::VEHICLE_NOT_ARMED;
+        return false;
+    }
+
+    if (telemetry.nav_state == NavState::UNKNOWN ||
+        telemetry.nav_state == NavState::MANUAL) {
+        out_reason = CommandBlockReason::MISSION_STATE_BLOCK;
+        return false;
+    }
+
+    return true;
+
 
     case VehicleCommand::LAND:
         return telemetry.isAirborne();
@@ -153,10 +156,20 @@ void CommandManager::update(
     if (!active_command_)
         return;
 
+    // 🔒 CHANGE-5: Cancel AUTO if PX4 disarmed itself
+    if (telemetry.arm_state == ArmState::DISARMED &&
+        active_command_->logical_cmd == VehicleCommand::SET_MODE_AUTO) {
+
+        std::cout << "[CMD CANCEL] AUTO canceled due to DISARM\n";
+        active_command_.reset();
+        return;
+    }
+
     handleAck(telemetry, state);
     handleRetry();
-
 }
+
+
 
 
 // -------------------------------------------------
@@ -168,23 +181,24 @@ void CommandManager::handleRetry() {
     auto& cmd = active_command_.value();
 
     auto elapsed =
-        chrono::duration_cast<chrono::milliseconds>(
-            chrono::steady_clock::now() - cmd.last_sent_time).count();
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - cmd.last_sent_time).count();
 
     if (elapsed < 3000)
         return;
 
     if (cmd.retry_count >= cmd.max_retries) {
-        cout << "[CMD TIMEOUT] aborting\n";
+        std::cout << "[CMD TIMEOUT] Command retry limit exceeded\n";
+        command_timed_out_ = true;
         active_command_.reset();
         return;
     }
 
     cmd.retry_count++;
-    cmd.last_sent_time = chrono::steady_clock::now();
+    cmd.last_sent_time = std::chrono::steady_clock::now();
     sender_->sendRawCommand(cmd.mavlink_cmd_id);
 
-    cout << "[CMD RETRY] count=" << cmd.retry_count << endl;
+    std::cout << "[CMD RETRY] count=" << cmd.retry_count << std::endl;
 }
 
 void CommandManager::handleAck(
@@ -208,7 +222,9 @@ void CommandManager::handleAck(
 
         switch (cmd.logical_cmd) {
         case VehicleCommand::ARM:
-            state = SystemState::ARMED;
+            //state = SystemState::ARMED;
+            // Do nothing here
+            // ARM confirmation must come from telemetry heartbeat
             break;
 
         case VehicleCommand::DISARM:

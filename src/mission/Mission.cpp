@@ -1,5 +1,6 @@
 #include "Mission.h"
 #include "MissionPolicy.h"
+#include "mission/MissionAbortReason.h"
 
 namespace mission {
 
@@ -18,17 +19,6 @@ bool Mission::isStateNewlyEntered() const {
 void Mission::markStateHandled() {
     state_just_changed_ = false;
 }
-
-bool Mission::apply_event(MissionEvent event) {
-    if (!MissionPolicy::is_event_allowed(current_state_, event)) {
-        return false;
-    }
-
-    current_state_ = transition(current_state_, event);
-    state_just_changed_ = true;  // NEW: Mark that we just transitioned
-    return true;
-}
-
 MissionState Mission::transition(MissionState state, MissionEvent event) {
     switch (state) {
 
@@ -55,9 +45,10 @@ MissionState Mission::transition(MissionState state, MissionEvent event) {
             break;
 
         case MissionState::SEARCH:
-            if (event == MissionEvent::TARGET_DETECTED)
+            if (event == MissionEvent::OPERATOR_ENGAGE_CONFIRM)
                 return MissionState::ENGAGE;
             break;
+
 
         case MissionState::ENGAGE:
             if (event == MissionEvent::ENGAGEMENT_COMPLETE)
@@ -93,5 +84,31 @@ bool Mission::hasValidProfile() const {
 const MissionProfile& Mission::getProfile() const {
     return profile_.value();
 }
+bool Mission::apply_event(MissionEvent event) {
+    auto next = transition(current_state_, event);
+
+    if (next != current_state_) {
+        current_state_ = next;
+        state_just_changed_ = true;
+
+        // ✅ CLEAR abort reason unless this is an abort
+        if (event != MissionEvent::SYSTEM_FAILURE) {
+            abort_reason_ = MissionAbortReason::NONE;
+        }
+
+        return true;
+    }
+    return false;
+}
+// PRD: Abort Reason Latching (Authoritative)
+// ---------------------------------------------
+void Mission::setAbortReason(MissionAbortReason reason) {
+    abort_reason_ = reason;
+}
+
+MissionAbortReason Mission::getAbortReason() const {
+    return abort_reason_;
+}
+
 
 } // namespace mission

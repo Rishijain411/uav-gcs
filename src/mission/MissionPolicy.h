@@ -29,7 +29,9 @@ public:
 
             case MissionState::SEARCH:
                 return event == MissionEvent::TARGET_DETECTED ||
-                       event == MissionEvent::SYSTEM_FAILURE;
+                    event == MissionEvent::OPERATOR_ENGAGE_CONFIRM ||
+                    event == MissionEvent::SYSTEM_FAILURE;
+
 
             case MissionState::ENGAGE:
                 return event == MissionEvent::ENGAGEMENT_COMPLETE ||

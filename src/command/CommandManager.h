@@ -3,9 +3,6 @@
 #include <optional>
 #include <chrono>
 #include <iostream>
-#include <string>
-#include <vector>
-using namespace std;
 
 #include "VehicleCommand.h"
 #include "core/SystemState.h"
@@ -36,6 +33,9 @@ public:
 
     bool hasActiveCommand() const;
 
+    // ✅ NEW: timeout status (for MissionController)
+    bool hasCommandTimedOut() const { return command_timed_out_; }
+
     // Phase C: Search waypoint publishing
     void sendSearchWaypoint(const GeoPoint& waypoint);
 
@@ -49,7 +49,7 @@ private:
         uint16_t mavlink_cmd_id;
         int retry_count = 0;
         int max_retries = 3;
-        chrono::steady_clock::time_point last_sent_time;
+        std::chrono::steady_clock::time_point last_sent_time;
     };
 
     uint16_t mapToMavlinkCommand(VehicleCommand cmd) const;
@@ -60,6 +60,9 @@ private:
 
     void handleRetry();
 
-    optional<TrackedCommand> active_command_;
+    std::optional<TrackedCommand> active_command_;
     MavlinkCommandSender* sender_ = nullptr;
+
+    // ✅ NEW
+    bool command_timed_out_ = false;
 };
