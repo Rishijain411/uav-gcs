@@ -1,4 +1,5 @@
 #include "command/MavlinkCommandSender.h"
+#include "comm/LinkManager.h"
 #include "mission/search/SearchPattern.h"
 
 #include <arpa/inet.h>
@@ -18,19 +19,17 @@ static constexpr uint8_t GCS_COMP_ID = MAV_COMP_ID_MISSIONPLANNER;
 // Constructor
 // --------------------------------------------------
 MavlinkCommandSender::MavlinkCommandSender(
-    int socket_fd,
+    LinkManager& link,
     uint8_t target_sys)
-    : sockfd(socket_fd),
+    : link_(link),
       target_sysid(target_sys) {
 
     memset(&px4_addr, 0, sizeof(px4_addr));
     px4_addr.sin_family = AF_INET;
-
-    // ✅ PX4 COMMAND INPUT PORT (SITL)
-    px4_addr.sin_port = htons(18570);
-
+    px4_addr.sin_port   = htons(18570);
     inet_pton(AF_INET, "127.0.0.1", &px4_addr.sin_addr);
 }
+
 
 // --------------------------------------------------
 // CORE: Generic COMMAND_LONG sender (PX4-correct)
@@ -57,14 +56,14 @@ void MavlinkCommandSender::sendCommand(
 
     uint16_t len = mavlink_msg_to_send_buffer(buffer, &msg);
 
-    ssize_t sent = sendto(
-        sockfd,
-        buffer,
-        len,
-        0,
-        reinterpret_cast<sockaddr*>(&px4_addr),
-        sizeof(px4_addr)
-    );
+    ssize_t sent = link_.send(
+    buffer,
+    len,
+    reinterpret_cast<sockaddr*>(&px4_addr),
+    sizeof(px4_addr)
+);
+
+
 
     if (sent < 0) {
         perror("[GCS] send to failed");
@@ -84,6 +83,9 @@ void MavlinkCommandSender::sendDisarm() {
 }
 
 void MavlinkCommandSender::sendTakeoff(float altitude_m) {
+    if (altitude_m <= 0.0f)
+        altitude_m = 10.0f;   // ✅ SITL-safe default
+
     sendCommand(
         MAV_CMD_NAV_TAKEOFF,
         0, 0, 0, 0, 0, 0,
@@ -102,6 +104,18 @@ void MavlinkCommandSender::sendSetModeAuto() {
         0
     );
 }
+void MavlinkCommandSender::sendSetModeRTL() {
+    sendCommand(MAV_CMD_NAV_RETURN_TO_LAUNCH);
+}
+
+void MavlinkCommandSender::sendSetModeLoiter() {
+    sendCommand(
+        MAV_CMD_DO_SET_MODE,
+        MAV_MODE_AUTO_ARMED,
+        MAV_MODE_FLAG_CUSTOM_MODE_ENABLED
+    );
+}
+
 // --------------------------------------------------
 // Phase C: Send search waypoint via SET_POSITION_TARGET_GLOBAL_INT
 // --------------------------------------------------
@@ -133,14 +147,13 @@ void MavlinkCommandSender::sendSearchWaypoint(const GeoPoint& waypoint) {
     );
 
     uint16_t len = mavlink_msg_to_send_buffer(buffer, &msg);
-    ssize_t sent = sendto(
-        sockfd,
+    ssize_t sent = link_.send(
         buffer,
         len,
-        0,
         reinterpret_cast<sockaddr*>(&px4_addr),
         sizeof(px4_addr)
     );
+
 
     if (sent < 0) {
         perror("[GCS] sendto waypoint failed");

@@ -1,15 +1,15 @@
 #pragma once
 
-#include <cstdint>
 #include <netinet/in.h>
+
+class LinkManager;
 
 class GcsHeartbeat {
 public:
-    explicit GcsHeartbeat(int socket_fd);
-
+    explicit GcsHeartbeat(LinkManager& link);
     void send();
 
 private:
-    int sockfd;
-    sockaddr_in target_addr;
+    LinkManager& link_;
+    sockaddr_in target_addr{};
 };

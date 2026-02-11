@@ -7,6 +7,7 @@
 using namespace std;
 
 #include "comm/UdpTransport.h"
+#include "comm/LinkManager.h"
 #include "telemetry/TelemetryParser.h"
 #include "telemetry/TelemetryData.h"
 #include "core/StateManager.h"
@@ -14,6 +15,9 @@ using namespace std;
 #include "command/MavlinkCommandSender.h"
 #include "comm/GcsHeartbeat.h"
 
+// Secure Channel
+#include "security/SecureChannel.h"
+#include "security/SecurityManager.h"
 #include "mission/Mission.h"
 #include "mission/MissionEvent.h"
 
@@ -22,13 +26,18 @@ using namespace std;
 #include "authority/AuditLogger.h"
 #include "authority/MissionTransitionAuthority.h"
 
-// 🔹 NEW: Mission controller (Search + Engagement binding)
+// Mission controller
 #include "mission/MissionController.h"
 
 // Phase B: Mission Planning
 #include "mission/MissionProfile.h"
 #include "mission/MissionProfileParser.h"
 #include "mission/PreFlightBit.h"
+
+// Video streamming
+#include "video/VideoLink.h"
+#include "video/JetsonVideoLink.h"
+#include "video/NullVideoLink.h"
 
 constexpr int HEARTBEAT_TIMEOUT_MS = 2000;
 
@@ -42,44 +51,33 @@ bool dispatchCommand(
     mission::MissionState mission_state,
     const TelemetryData& telemetry)
 {
-    // -------- Operator Authorization --------
     if (!OperatorAuthorization::hasPending()) {
-            OperatorAuthorization::request(cmd, mission_state);
-            return false;
-        }
+        OperatorAuthorization::request(cmd, mission_state);
+        return false;
+    }
 
     auto decision = OperatorAuthorization::pollDecision();
     if (!decision.has_value())
         return false;
 
     if (!decision.value()) {
-        OperatorAuthorization::consumeDecision();  // NEW: Mark decision as consumed
-        
+        OperatorAuthorization::consumeDecision();
         cout << "[AUTH] Operator denied command\n";
         return false;
     }
 
-    OperatorAuthorization::consumeDecision();  // NEW: Mark decision as consumed
-    
-    // -------- Command Execution --------
+    OperatorAuthorization::consumeDecision();
+
     bool ok = cmd_mgr.requestCommand(
         cmd,
         system_state,
         mission_state,
         telemetry);
 
-    if (ok) {
-        AuditLogger::logDecision(
-            cmd,
-            mission_state,
-            "EXECUTED");
-    } else {
-        AuditLogger::logDecision(
-            cmd,
-            mission_state,
-            "BLOCKED",
-            "CommandManager rejected");
-    }
+    AuditLogger::logDecision(
+        cmd,
+        mission_state,
+        ok ? "EXECUTED" : "BLOCKED");
 
     return ok;
 }
@@ -89,19 +87,17 @@ bool dispatchCommand(
 // ============================================================
 int main(int argc, char* argv[]) {
 
-    // Phase B: Parse command-line arguments for mission file
     string mission_file;
-    
+
     if (argc > 1) {
         mission_file = argv[1];
     } else {
-        // Try to find config file in multiple locations
         vector<string> possible_paths = {
-            "config/sample_mission.json",           // Current directory
-            "../config/sample_mission.json",        // Parent directory (if running from build/)
-            "../../config/sample_mission.json"      // Two levels up
+            "config/sample_mission.json",
+            "../config/sample_mission.json",
+            "../../config/sample_mission.json"
         };
-        
+
         for (const auto& path : possible_paths) {
             ifstream test(path);
             if (test.is_open()) {
@@ -110,66 +106,108 @@ int main(int argc, char* argv[]) {
                 break;
             }
         }
-        
+
         if (mission_file.empty()) {
-            cerr << "[ERROR] Cannot find config/sample_mission.json\n";
-            cerr << "[ERROR] Please provide mission file path as argument:\n";
-            cerr << "  ./my_gcs /path/to/mission.json\n";
+            cerr << "[ERROR] Mission file not found\n";
             return -1;
         }
     }
-    
+
     cout << "[GCS] Starting GCS-Vyuha\n";
     cout << "[GCS] Mission file: " << mission_file << "\n";
 
-    UdpTransport udp;
+    // 🔐 Security Mode Audit (PRD requirement)
+
+    if (!SecurityManager::enabled()) {
+        AuditLogger::logDecision(
+            VehicleCommand::NONE,
+            mission::MissionState::INIT,
+            "SECURITY_MODE",
+            "PLAINTEXT (Jetson absent, dev mode)"
+        );
+    } else {
+        AuditLogger::logDecision(
+            VehicleCommand::NONE,
+            mission::MissionState::INIT,
+            "SECURITY_MODE",
+            "ENCRYPTED (Jetson mode)"
+        );
+    }
+
     TelemetryData telemetry;
     StateManager stateManager;
     CommandManager commandManager;
     TelemetryParser parser(telemetry, stateManager);
-
     mission::Mission mission;
-    
-    // Phase B: Load mission profile
+
+    // Video Link (Jetson-ready, flag gated)
+    std::unique_ptr<VideoLink> video;
+
+    // ---------------- Mission Profile ----------------
     mission::MissionProfile profile;
     string error_msg;
-    if (!mission::MissionProfileParser::parseFromJson(mission_file, profile, error_msg)) {
-        cerr << "[ERROR] Failed to load mission profile: " << error_msg << "\n";
-        cerr << "[ERROR] Cannot proceed without valid mission profile (PRD requirement)\n";
+
+    if (!mission::MissionProfileParser::parseFromJson(
+            mission_file, profile, error_msg)) {
+        cerr << "[ERROR] Mission profile load failed: " << error_msg << "\n";
         return -1;
     }
-    
+
     if (!mission.loadProfile(profile)) {
         cerr << "[ERROR] Invalid mission profile\n";
         return -1;
     }
-    
-    cout << "[GCS] Mission profile loaded successfully\n";
-    if (profile.target_id.has_value()) {
-        cout << "[GCS] Target ID: " << profile.target_id.value() << "\n";
-    }
-    cout << "[GCS] Search area: " << profile.search_area.vertices.size() << " vertices\n";
-    cout << "[GCS] Waypoints: " << profile.waypoints.size() << "\n";
 
-    // 🔹 NEW: Mission-level controller
+    cout << "[GCS] Mission profile loaded\n";
+
+    // Video link selection (security flag gated)
+    if (SecurityManager::enabled()) {
+        video = std::make_unique<JetsonVideoLink>();
+        cout << "[VIDEO] Jetson video link selected\n";
+    } else {
+        // Plaintext / dev mode → no video
+        video = std::make_unique<NullVideoLink>();
+        cout << "[VIDEO] Video disabled (no Jetson)\n";
+    }
+
+    // Start video subsystem (safe no-op in NullVideoLink)
+    video->start();
+
+
+    //  Secure Channel (MISSION SCOPED)
+    SecureChannel secureChannel(profile.crypto.mission_key);
+
+    // 🔐 Transport Links (Security gated by flag)
+    // RF link (direct PX4 path)
+    UdpTransport rf_udp(
+        SecurityManager::enabled() ? &secureChannel : nullptr,
+        LinkType::RF,
+        SecurityManager::enabled()
+    );
+
+    // LTE / Jetson link
+    UdpTransport lte_udp(
+        SecurityManager::enabled() ? &secureChannel : nullptr,
+        LinkType::LTE,
+        SecurityManager::enabled()
+    );
+
+
+    rf_udp.start(14550);     // RF port
+    lte_udp.start(15550);    // LTE fallback port
+
+    LinkManager linkManager(rf_udp, lte_udp);
+
+    // Mission controller
     MissionController missionController;
-
-    if (!udp.start(14550)) {
-        cerr << "Failed to start UDP transport\n";
-        return -1;
-    }
-
-    // Phase C: Wire CommandManager to MissionController for waypoint publishing
     missionController.setCommandManager(&commandManager);
 
-    // ---------------- GCS Heartbeat ----------------
-    GcsHeartbeat gcsHeartbeat(udp.getSocketFd());
+    // Heartbeat
+    GcsHeartbeat gcsHeartbeat(linkManager);
     auto last_hb = chrono::steady_clock::now();
     auto last_failsafe_check = chrono::steady_clock::now();
 
-    cout << "[GCS] Heartbeat sender initialized\n";
-
-    // ---------------- Command sender ----------------
+    // Command sender
     MavlinkCommandSender* cmdSender = nullptr;
     bool sender_initialized = false;
 
@@ -180,14 +218,15 @@ int main(int argc, char* argv[]) {
 
         auto now = chrono::steady_clock::now();
 
-        // ---------- Send GCS heartbeat ----------
+        // ---------- GCS heartbeat ----------
         if (chrono::duration_cast<chrono::seconds>(now - last_hb).count() >= 1) {
             gcsHeartbeat.send();
             last_hb = now;
         }
 
-        // ---------- Receive MAVLink ----------
-        int len = udp.receive(buffer, sizeof(buffer));
+        // ---------- Receive encrypted MAVLink ----------
+        int len = linkManager.receive(buffer, sizeof(buffer));
+
         if (len > 0) {
             for (int i = 0; i < len; i++)
                 parser.parse(buffer[i]);
@@ -199,22 +238,19 @@ int main(int argc, char* argv[]) {
         // ---------- Init command sender ----------
         if (!sender_initialized && telemetry.heartbeat_received) {
             cmdSender = new MavlinkCommandSender(
-                udp.getSocketFd(),
-                telemetry.system_id
-            );
+            linkManager,telemetry.system_id);
+
             commandManager.setCommandSender(cmdSender);
             sender_initialized = true;
             cout << "[GCS] Command sender initialized\n";
         }
 
         // ---------- FAILSAFE CHECK ----------
-        // Check every 200ms if we've lost the heartbeat
         if (chrono::duration_cast<chrono::milliseconds>(
                 now - last_failsafe_check).count() >= 200) {
 
             last_failsafe_check = now;
 
-            // Only check failsafe if we previously had heartbeat contact
             if (telemetry.heartbeat_received) {
                 auto hb_elapsed =
                     chrono::duration_cast<chrono::milliseconds>(
@@ -234,10 +270,9 @@ int main(int argc, char* argv[]) {
                         VehicleCommand::NONE,
                         mission.state(),
                         "FAILSAFE",
-                        "MAVLink timeout");
+                        "MAVLink timeout over secure link");
 
-                    cout << "[FAILSAFE] MAVLink timeout detected after " 
-                         << hb_elapsed << "ms\n";
+                    cout << "[FAILSAFE] Encrypted link lost\n";
                 }
             }
         }
@@ -307,41 +342,7 @@ int main(int argc, char* argv[]) {
             }
             break;
 
-        case mission::MissionState::ARMED:
-            if (mission.isStateNewlyEntered()) {
-                // Keep trying to dispatch ARM command until it succeeds
-                bool arm_success = dispatchCommand(
-                    commandManager,
-                    VehicleCommand::ARM,
-                    stateManager.getState(),
-                    mission.state(),
-                    telemetry);
-                
-                if (arm_success) {
-                    mission.markStateHandled();
-                    cout << "[ARMED] ARM command sent successfully\n";
-                }
-            } else {
-                // Debug: Check conditions MORE FREQUENTLY
-                static int debug_counter = 0;
-                if (++debug_counter % 10 == 0) {  // Print every ~1 second at 10Hz
-                    cout << "[ARMED_DEBUG] hasActiveCommand=" << commandManager.hasActiveCommand() 
-                         << " arm_state=" << (int)telemetry.arm_state 
-                         << " (0=DISARMED, 1=ARMED)\n";
-                }
-                
-                // After ARM command completes and vehicle is armed, 
-                // request operator approval to transition to TRANSIT
-                if (!commandManager.hasActiveCommand() &&
-                    telemetry.arm_state == ArmState::ARMED) {
-                    // Vehicle is armed, request operator approval to advance
-                    cout << "[ARMED] ✓ Vehicle confirmed ARMED! Requesting transition to TRANSIT\n";
-                    MissionTransitionAuthority::requestTransition(
-                        mission,
-                        mission::MissionEvent::TRANSIT_REACHED);
-                }
-            }
-            break;
+        
 
         case mission::MissionState::TRANSIT:
             if (mission.isStateNewlyEntered()) {
@@ -395,6 +396,10 @@ int main(int argc, char* argv[]) {
             break;
         }
     }
+    if (video) {
+    video->stop();
+}
+
 
     return 0;
 }

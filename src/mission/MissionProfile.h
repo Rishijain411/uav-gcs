@@ -3,7 +3,8 @@
 #include <string>
 #include <vector>
 #include <optional>
-// NEW:
+#include <array>
+#include <cstdint>
 #include "mission/search/SearchPattern.h"
 
 namespace mission {
@@ -47,6 +48,17 @@ struct SearchArea {
         return vertices.size() >= 3;  // Minimum 3 points for polygon
     }
 };
+// Phase 5.2 — Mission Crypto
+struct MissionCrypto {
+    std::array<uint8_t, 32> mission_key{};
+    uint32_t key_epoch = 0;
+    std::string key_id;
+
+    bool isValid() const {
+        return !key_id.empty();
+    }
+};
+
 
 // Mission Profile (PRD Phase 1)
 struct MissionProfile {
@@ -64,12 +76,18 @@ struct MissionProfile {
     
     // Failsafe rules
     FailsafeRules failsafe_rules;
+
+    // Mission crypto
+    MissionCrypto crypto;
     
     // Validation
     bool isValid() const {
-        return search_area.isValid() && !waypoints.empty();
+        return search_area.isValid() &&
+               !waypoints.empty() &&
+               crypto.isValid();
     }
 };
 
-} // namespace mission
+} 
+
 

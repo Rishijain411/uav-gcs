@@ -6,8 +6,10 @@ enum class MissionEvent {
     LOAD_MISSION,
     PREFLIGHT_OK,
     PREFLIGHT_FAIL,
+    VEHICLE_ARMED,
 
     OPERATOR_ARM_CONFIRM,
+    OPERATOR_AUTO_CONFIRM,   
     OPERATOR_ABORT,
 
     TRANSIT_REACHED,
@@ -16,9 +18,9 @@ enum class MissionEvent {
     OPERATOR_ENGAGE_CONFIRM,
     ENGAGEMENT_COMPLETE,
     ENGAGEMENT_FAILED,
+    BDA_EVALUATED,
 
     RTB_COMPLETE,
     SYSTEM_FAILURE
 };
-
-} // namespace mission
+}

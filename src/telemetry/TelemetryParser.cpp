@@ -13,7 +13,7 @@ static mavlink_message_t msg;
 static mavlink_status_t mav_status;
 
 // 🔒 MUST MATCH GCS HEARTBEAT SYSID
-static constexpr uint8_t GCS_SYS_ID = 50;
+static constexpr uint8_t GCS_SYS_ID = 250;
 
 TelemetryParser::TelemetryParser(
     TelemetryData& data,
@@ -50,6 +50,10 @@ void TelemetryParser::parse(uint8_t byte) {
             (hb.base_mode & MAV_MODE_FLAG_SAFETY_ARMED)
                 ? ArmState::ARMED
                 : ArmState::DISARMED;
+        if (telemetry.arm_state == ArmState::ARMED) {
+        // emit MissionEvent::VEHICLE_ARMED
+        }
+
 
         // ---- NAV STATE (PX4 – SAFE DECODE) ----
         uint8_t main_mode = (hb.custom_mode >> 16) & 0xFF;
@@ -202,6 +206,20 @@ void TelemetryParser::parse(uint8_t byte) {
 
         break;
     }
+    case MAVLINK_MSG_ID_GLOBAL_POSITION_INT: {
+        mavlink_global_position_int_t pos;
+        mavlink_msg_global_position_int_decode(&msg, &pos);
+
+        telemetry.latitude_deg  = pos.lat / 1e7;
+        telemetry.longitude_deg = pos.lon / 1e7;
+
+        telemetry.relative_alt_m = pos.relative_alt / 1000.0f;
+        telemetry.altitude_received = true;
+
+        telemetry.position_received = true;
+        break;
+    }
+
 
 
     default:

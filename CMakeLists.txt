@@ -5,7 +5,7 @@ project(my_gcs LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Qt configuration (optional - only if building UI)
+# Qt configuration (optional)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
@@ -19,6 +19,11 @@ include_directories(
 )
 
 # =====================================================
+#                    DEPENDENCIES
+# =====================================================
+find_package(OpenSSL REQUIRED)
+
+# =====================================================
 #                    MAIN GCS TARGET
 # =====================================================
 add_executable(my_gcs
@@ -27,6 +32,10 @@ add_executable(my_gcs
     # ---------------- Comm ----------------
     src/comm/UdpTransport.cpp
     src/comm/GcsHeartbeat.cpp
+    src/comm/LinkManager.cpp
+
+    # ---------------- Security ----------------
+    src/security/SecureChannel.cpp
 
     # ---------------- Telemetry ----------------
     src/telemetry/TelemetryParser.cpp
@@ -46,15 +55,22 @@ add_executable(my_gcs
     # ---------------- Mission Logic ----------------
     src/mission/search/ExpandingSquarePattern.cpp
     src/mission/engagement/EngagementPolicy.cpp
-    
+
     # ---------------- Phase B: Mission Planning ----------------
     src/mission/MissionProfileParser.cpp
     src/mission/PreFlightBit.cpp
 
     # ---------------- Authority ----------------
     src/authority/OperatorAuthorization.cpp
+    # ---------------- Video Streaming----------------
+    src/video/NullVideoLink.cpp
+    src/video/JetsonVideoLink.cpp
+    src/video/NullSrtpSession.cpp
+
 )
 
+# OpenSSL (Security)
+target_link_libraries(my_gcs PRIVATE OpenSSL::Crypto)
 # =====================================================
 #                    TEST TARGETS
 # =====================================================

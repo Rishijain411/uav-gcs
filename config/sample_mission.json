@@ -1,5 +1,16 @@
 {
   "target_id": "TARGET_001",
+
+  "security": {
+    "mode": "PLAINTEXT"
+  },
+
+  "crypto": {
+    "key_id": "MISSION_KEY_ALPHA",
+    "key_epoch": 1,
+    "mission_key_hex": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+  },
+
   "search_area": {
     "vertices": [
       [37.7749, -122.4194, 50.0],
@@ -10,20 +21,22 @@
     "min_altitude_m": 30.0,
     "max_altitude_m": 100.0
   },
+
   "waypoints": [
     [37.7749, -122.4194, 50.0],
     [37.7750, -122.4190, 60.0],
     [37.7755, -122.4190, 70.0]
   ],
+
   "payload_policy": {
     "type": "KINETIC",
     "arm_on_engagement": true,
     "arming_delay_seconds": 2.0
   },
+
   "failsafe_rules": {
     "comms_loss": "RTL",
     "low_battery": "RTL",
     "gps_jamming": "LAND"
   }
 }
-

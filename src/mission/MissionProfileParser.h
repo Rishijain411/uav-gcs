@@ -2,6 +2,8 @@
 
 #include "MissionProfile.h"
 #include <string>
+#include <string>
+#include <array>
 
 namespace mission {
 
@@ -32,6 +34,9 @@ private:
     
     // Helper: Parse payload type from string
     static PayloadType parsePayloadType(const std::string& str);
+
+    static bool parseHexKey(const std::string& hex,std::array<uint8_t, 32>& out);
+
 };
 
 } // namespace mission

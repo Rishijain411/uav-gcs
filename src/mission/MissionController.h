@@ -19,6 +19,10 @@ class CommandManager;
 #include "mission/engagement/EngagementPolicy.h"
 #include "authority/OperatorAuthorization.h"
 #include "authority/AuditLogger.h"
+#include "mission/BDAResult.h"
+#include "mission/RecoveryPlan.h"
+
+
 
 class MissionController {
 public:
@@ -37,12 +41,25 @@ private:
     unique_ptr<SearchPattern> search_pattern_;
     EngagementPolicy engagement_policy_;
     CommandManager* cmd_manager_ = nullptr;
+    // Phase 4.1 — BDA tracking
+    std::chrono::steady_clock::time_point assess_start_time_;
+    int stable_frames_ = 0;
+    bool bda_completed_ = false;
+    bool auto_mode_authorized_ = false;
+    bool takeoff_requested_ = false;
+    bool takeoff_completed_ = false;
+    bool auto_mode_sent_ = false;
+    GeoPoint current_waypoint_;
+    bool current_waypoint_active_ = false;
+
+
 
     // Phase C: SEARCH autonomy (generate periodically, reset on entry)
     mission::MissionState last_state_ = mission::MissionState::INIT;
     std::chrono::steady_clock::time_point next_search_gen_time_{};
     std::chrono::milliseconds search_gen_interval_{1000}; // 1 Hz waypoint intent generation
-
+    static constexpr int BDA_MIN_DURATION_MS = 1000;
+    static constexpr int BDA_STABLE_FRAMES = 5;
     void handleSearch(
         mission::Mission& mission,
         const TelemetryData& telemetry);
@@ -50,4 +67,17 @@ private:
     void handleEngage(
         mission::Mission& mission,
         const TelemetryData& telemetry);
+
+    void handleRecovery(
+    mission::Mission& mission,
+    const TelemetryData& telemetry);
+
+    mission::BDAResult evaluateBDA(const TelemetryData& telemetry);
+    void handleAssess(mission::Mission& mission, const TelemetryData& telemetry);
+    
+    mission::RecoveryPlan buildRecoveryPlan(
+    const mission::Mission& mission,
+    const TelemetryData& telemetry,
+    mission::BDAResult bda) const;
+
 };

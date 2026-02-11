@@ -97,6 +97,17 @@ struct TelemetryData {
     FlightPhase flight_phase = FlightPhase::UNKNOWN;
     bool extended_state_received = false;
 
+    // ---------- Altitude ----------
+    float relative_alt_m = 0.0f;
+    bool altitude_received = false;
+
+    // ---------- Global Position ----------
+    double latitude_deg = 0.0;
+    double longitude_deg = 0.0;
+    bool position_received = false;
+
+
+
     // ---------- Phase 5: Last Command Block Reason ----------
     CommandBlockReason last_block_reason =
         CommandBlockReason::NONE;
@@ -133,10 +144,15 @@ struct TelemetryData {
     }
 
     bool isAirborne() const {
-        return flight_phase == FlightPhase::IN_AIR;
+        return altitude_received &&
+            relative_alt_m > 1.5f &&   // PX4-safe takeoff threshold
+            flight_phase == FlightPhase::IN_AIR;
     }
 
     bool isLanded() const {
-        return flight_phase == FlightPhase::ON_GROUND;
+        return altitude_received &&
+            relative_alt_m < 0.3f &&
+            flight_phase == FlightPhase::ON_GROUND;
     }
+
 };
