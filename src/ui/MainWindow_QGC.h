@@ -4,6 +4,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QTextEdit>
+#include <QPlainTextEdit>
 #include <QFrame>
 #include <QProgressBar>
 #include <QToolBar>
@@ -12,12 +13,28 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
+#include <QComboBox>
+#include <QCheckBox>
+#include <QListWidget>
+#include <QGroupBox>
+#include <QSpinBox>
+#include <QFileDialog>
+#include <QSlider>
+#include <QScrollArea>
+#include <QTabWidget>
+#include <QSplitter>
+
+#include "mission/MissionProfile.h"
+#include "ui/IntegratedBackend.h"
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
     explicit MainWindow(QWidget *parent = nullptr);
+    
+    // Set the backend interface
+    void setBackend(IntegratedBackend* backend) { backend_ = backend; }
     ~MainWindow();
 
 public slots:
@@ -27,46 +44,184 @@ public slots:
     void onTakeoffClicked();
     void onLandClicked();
     void onAbortClicked();
+    void onArmHoldPress();
+    void onArmHoldRelease();
+    void onAbortHoldPress();
+    void onAbortHoldRelease();
+    void onTakeoffHoldPress();
+    void onTakeoffHoldRelease();
     void onApproveClicked();
     void onDenyClicked();
+    void onRtlClicked();
+    void onMissionProfileUpload();
+    void onPreflightPress();
+    void onPreflightRelease();
+    void onEngagePress();
+    void onEngageRelease();
+    void onBdaYes();
+    void onBdaNo();
+    void onBdaUnknown();
+    void resetCommandButton(QPushButton* button, const QString& baseText);
+    
+    // Backend integration slots
+    void onConnectionStatusChanged(const QString& status);
+    void onMissionStateChanged(const QString& state);
+    void updateTelemetryDisplay(double lat, double lon, double alt);
+    void updateArmState(bool armed);
+    void updateFlightMode(const QString& mode);
+    void updateBatteryDisplay(int percent);
+    void updateMissionUploadProgress(int sent, int total);
+    void updateCurrentWaypoint(uint16_t seq);
+    void displayError(const QString& error);
+    void onMissionUploadSuccess();
 
 private:
+    enum class MissionUploadStatus {
+        NOT_LOADED,
+        IN_PROGRESS,
+        ACCEPTED,
+        FAILED
+    };
+
     void setupUI();
     void createTopToolbar();
     void createCenterLayout();
-    void createInstrumentPanel(QWidget* parent);
-    void createMapPanel(QWidget* parent);
-    void createActionPanel(QWidget* parent);
+    void createLeftSidebar(QWidget* parent);
+    void createCenterPanel(QWidget* parent);
+    void createRightPanel(QWidget* parent);
+    void createBottomPanel(QWidget* parent);
     void createStatusBar();
+    QFrame* createAssetCard(const QString& name, const QString& phase, int batteryPercent, const QString& link, const QString& urgency = "NORMAL");
+    void appendAuditLog(const QString& text, const QString& color);
+    void setCommandPending(QPushButton* button, const QString& baseText);
+    void setCommandAcked(QPushButton* button, const QString& baseText);
 
     // === TOP TOOLBAR ===
     QLabel* lblConnection;
+    QLabel* lblEncryption;
+    QLabel* lblLatency;
+    QLabel* lblTelemetryRate;
+    QLabel* lblActiveCount;
     QLabel* lblArmed;
     QLabel* lblFlightMode;
     QLabel* lblMissionStatus;
-    
-    // === INSTRUMENT PANEL (LEFT) ===
+
+    // === LEFT SIDEBAR ===
+    QLabel* lblPhaseInit;
+    QLabel* lblPhaseArm;
+    QLabel* lblPhaseSearch;
+    QLabel* lblPhaseEngage;
+    QLabel* lblPhaseRtl;
+    QLabel* lblMissionFile;
+    QLabel* lblMissionSummaryTarget;
+    QLabel* lblMissionSummaryArea;
+    QLabel* lblMissionSummaryWaypoints;
+    QLabel* lblMissionSummaryAltitude;
+    QLabel* lblMissionSummaryPayload;
+    QLabel* lblMissionSummaryFailsafe;
+    QLabel* lblMissionSummaryStatus;
+    QLabel* lblMissionSummaryChecksum;
+    QPushButton* btnPreflightHold;
+    QProgressBar* preflightHoldProgress;
+    QComboBox* cmbCommsLoss;
+    QComboBox* cmbLowBattery;
+    QComboBox* cmbGpsJamming;
+    QCheckBox* chkMotors;
+    QCheckBox* chkBattery;
+    QCheckBox* chkMavlink;
+    QCheckBox* chkPayload;
+    QComboBox* cmbSearchMode;
+    QListWidget* listOitlQueue;
+    QSpinBox* spnReengageCount;
+    QLabel* lblBdaStatus;
+    QPushButton* btnRtl;
+    QPushButton* btnLand;
+    QCheckBox* chkBdaMotors;
+    QCheckBox* chkBdaLink;
+    QCheckBox* chkBdaPayload;
+    QPushButton* btnBdaYes;
+    QPushButton* btnBdaNo;
+    QPushButton* btnBdaUnknown;
+
+    // === CENTER ===
+    QLabel* lblMissionState;
+    QLabel* lblEngageBanner;
+    QLabel* lblCombatBubble;
+    QLabel* lblTargetLock;
+    QLabel* lblMapPlaceholder;
+    QLabel* lblNfzStatus;
+    QLabel* lblSearchPath;
+    QLabel* lblLockOverlay;
+    QLabel* lblMapLegend;
+    QFrame* mapFrame_ = nullptr;
+
+    // === RIGHT PANEL ===
+    QVBoxLayout* assetsLayout;
+
+    // === BOTTOM ===
+    QLabel* lblVideoPlaceholder;
     QLabel* lblAltValue;
     QLabel* lblSpeedValue;
     QLabel* lblBatteryPercent;
-    QProgressBar* batteryBar;
     QLabel* lblGpsValue;
     QLabel* lblLatValue;
     QLabel* lblLonValue;
-    
-    // === MAP/MISSION CENTER ===
-    QTextEdit* txtMissionLog;
-    QLabel* lblMissionState;
-    QPushButton* btnApprove;
-    QPushButton* btnDeny;
-    
-    // === ACTION PANEL (RIGHT) ===
+    QProgressBar* batteryBar;
+    QFrame* videoFrame_ = nullptr;
+    QFrame* telemetryFrame_ = nullptr;
+    QFrame* auditFrame_ = nullptr;
+
+    // === COMMAND AUTH + AUDIT ===
     QPushButton* btnArm;
     QPushButton* btnDisarm;
     QPushButton* btnTakeoff;
-    QPushButton* btnLand;
     QPushButton* btnAbort;
+    QPushButton* btnEngageHold;
+    QProgressBar* engageHoldProgress;
+    QProgressBar* armHoldProgress;
+    QProgressBar* abortHoldProgress;
+    QProgressBar* takeoffHoldProgress;
+    QTextEdit* txtAuditLog;
+
+
+    // UI gate state
+    bool missionProfileLoaded_ = false;
+    bool preflightConfirmed_ = false;
+    bool armConfirmed_ = false;
+
+    // Mission profile data
+    mission::MissionProfile missionProfile_{};
+    bool hasMissionChecksum_ = false;
+    uint32_t lastMissionChecksum_ = 0;
+    MissionUploadStatus missionUploadStatus_ = MissionUploadStatus::NOT_LOADED;
+    MissionUploadStatus lastLoggedMissionUploadStatus_ = MissionUploadStatus::NOT_LOADED;
+    int missionUploadTicks_ = 0;
+    QString lastMissionState_;  // Track last mission state to avoid duplicate logs
+
+    // Engage hold state
+    QTimer* engageHoldTimer;
+    int engageHoldMs_ = 0;
+    const int engageHoldRequiredMs_ = 900;
+
+    QTimer* preflightHoldTimer;
+    int preflightHoldMs_ = 0;
+    const int preflightHoldRequiredMs_ = 700;
+
+    QTimer* armHoldTimer;
+    int armHoldMs_ = 0;
+    const int armHoldRequiredMs_ = 3000;
+
+    QTimer* takeoffHoldTimer;
+    int takeoffHoldMs_ = 0;
+    const int takeoffHoldRequiredMs_ = 3000;
+
+    QTimer* abortHoldTimer;
+    int abortHoldMs_ = 0;
+    const int abortHoldRequiredMs_ = 800;
 
     // Update timer
     QTimer* updateTimer;
+    
+    // Backend integration
+    IntegratedBackend* backend_ = nullptr;
 };

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GCS-Vyuha Mission Profile",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "search_area",
+    "waypoints",
+    "payload_policy",
+    "failsafe_rules"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1, "maximum": 1 },
+    "target_id": { "type": "string" },
+    "search_area": {
+      "type": "object",
+      "required": ["vertices", "min_altitude_m", "max_altitude_m"],
+      "properties": {
+        "vertices": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3
+          }
+        },
+        "min_altitude_m": { "type": "number" },
+        "max_altitude_m": { "type": "number" }
+      }
+    },
+    "waypoints": {
+      "type": "array",
+      "minItems": 1
+    },
+    "payload_policy": {
+      "type": "object",
+      "required": ["type", "arm_on_engagement"],
+      "properties": {
+        "type": { "type": "string", "enum": ["NONE", "KINETIC", "EXPLOSIVE"] },
+        "arm_on_engagement": { "type": "boolean" },
+        "arming_delay_seconds": { "type": "number", "minimum": 0 }
+      }
+    },
+    "failsafe_rules": {
+      "type": "object",
+      "required": ["comms_loss", "low_battery", "gps_jamming"],
+      "properties": {
+        "comms_loss": { "type": "string", "enum": ["RTL", "LAND", "HOLD", "CONTINUE"] },
+        "low_battery": { "type": "string", "enum": ["RTL", "LAND", "HOLD", "CONTINUE"] },
+        "gps_jamming": { "type": "string", "enum": ["RTL", "LAND", "HOLD", "CONTINUE", "LOITER"] }
+      }
+    }
+  }
+}

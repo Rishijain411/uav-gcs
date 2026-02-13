@@ -14,6 +14,12 @@ struct CommandAckData {
     bool valid = false;
 };
 
+/* ---------- Mission ACK ---------- */
+struct MissionAckData {
+    uint8_t type = MAV_MISSION_ERROR;
+    bool valid = false;
+};
+
 enum class ArmState {
     DISARMED,
     ARMED
@@ -74,6 +80,18 @@ struct TelemetryData {
 
     // ---------- Command ACK ----------
     CommandAckData last_command_ack;
+
+    // ---------- Mission Upload ----------
+    bool mission_request_received = false;
+    uint16_t last_mission_request_seq = 0;
+    MissionAckData last_mission_ack;
+    bool mission_upload_in_progress = false;
+    bool mission_upload_complete = false;
+    bool mission_upload_failed = false;
+    
+    // Mission execution tracking (from MISSION_CURRENT)
+    uint16_t mission_current_seq = 0;
+    bool mission_current_received = false;
 
     // ---------- Connection ----------
     bool heartbeat_received = false;

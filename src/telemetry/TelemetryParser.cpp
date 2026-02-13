@@ -184,6 +184,46 @@ void TelemetryParser::parse(uint8_t byte) {
         break;
     }
 
+    // ================= MISSION REQUEST INT =================
+    case MAVLINK_MSG_ID_MISSION_REQUEST_INT: {
+        mavlink_mission_request_int_t req;
+        mavlink_msg_mission_request_int_decode(&msg, &req);
+        telemetry.last_mission_request_seq = req.seq;
+        telemetry.mission_request_received = true;
+        // std::cout << "[MISSION] REQUEST_INT seq=" << req.seq << std::endl;
+        break;
+    }
+
+    // ================= MISSION REQUEST (legacy) =================
+    case MAVLINK_MSG_ID_MISSION_REQUEST: {
+        mavlink_mission_request_t req;
+        mavlink_msg_mission_request_decode(&msg, &req);
+        telemetry.last_mission_request_seq = req.seq;
+        telemetry.mission_request_received = true;
+        // std::cout << "[MISSION] REQUEST seq=" << req.seq << std::endl;
+        break;
+    }
+
+    // ================= MISSION ACK =================
+    case MAVLINK_MSG_ID_MISSION_ACK: {
+        mavlink_mission_ack_t ack;
+        mavlink_msg_mission_ack_decode(&msg, &ack);
+        telemetry.last_mission_ack.type = ack.type;
+        telemetry.last_mission_ack.valid = true;
+        // std::cout << "[MISSION] ACK type=" << int(ack.type) << std::endl;
+        break;
+    }
+
+    // ================= MISSION CURRENT =================
+    case MAVLINK_MSG_ID_MISSION_CURRENT: {
+        mavlink_mission_current_t current;
+        mavlink_msg_mission_current_decode(&msg, &current);
+        telemetry.mission_current_seq = current.seq;
+        telemetry.mission_current_received = true;
+        // std::cout << "[MISSION] CURRENT seq=" << current.seq << std::endl;
+        break;
+    }
+
     // ================= STATUSTEXT (LOGGING ONLY) =================
     case MAVLINK_MSG_ID_STATUSTEXT: {
     mavlink_statustext_t st;

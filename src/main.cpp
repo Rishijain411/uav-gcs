@@ -33,6 +33,7 @@ using namespace std;
 #include "mission/MissionProfile.h"
 #include "mission/MissionProfileParser.h"
 #include "mission/PreFlightBit.h"
+#include "utils/MissionUploadBackoff.h"
 
 // Video streamming
 #include "video/VideoLink.h"
@@ -40,6 +41,44 @@ using namespace std;
 #include "video/NullVideoLink.h"
 
 constexpr int HEARTBEAT_TIMEOUT_MS = 2000;
+constexpr int MISSION_UPLOAD_MAX_RETRIES = 5;
+constexpr int MISSION_UPLOAD_BASE_BACKOFF_MS = 500;
+constexpr int MISSION_UPLOAD_TIMEOUT_MS = 15000;
+
+// ------------------------------------------------------------
+// Mission checksum (for audit/consistency)
+// ------------------------------------------------------------
+static uint32_t missionChecksum(const mission::MissionProfile& profile) {
+    uint32_t hash = 2166136261u;
+    auto mix = [&hash](uint32_t v) {
+        hash ^= v;
+        hash *= 16777619u;
+    };
+
+    for (const auto& wp : profile.waypoints) {
+        mix(static_cast<uint32_t>(wp.lat * 1e7));
+        mix(static_cast<uint32_t>(wp.lon * 1e7));
+        mix(static_cast<uint32_t>(wp.alt * 100));
+    }
+    mix(static_cast<uint32_t>(profile.search_area.vertices.size()));
+    mix(static_cast<uint32_t>(profile.waypoints.size()));
+    return hash;
+}
+
+static void writeMissionUploadStatus(const std::string& path,
+                                     const std::string& status,
+                                     int ack_type,
+                                     int retries) {
+    std::ofstream out(path);
+    if (!out.is_open()) {
+        return;
+    }
+    out << "{\n";
+    out << "  \"status\": \"" << status << "\",\n";
+    out << "  \"ack_type\": " << ack_type << ",\n";
+    out << "  \"retries\": " << retries << "\n";
+    out << "}\n";
+}
 
 // ------------------------------------------------------------
 // SAFE DISPATCH WRAPPER (OITL + AUDIT + COMMAND EXECUTION)
@@ -113,8 +152,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    cout << "[GCS] Starting GCS-Vyuha\n";
-    cout << "[GCS] Mission file: " << mission_file << "\n";
+    // Backend initialized
 
     // 🔐 Security Mode Audit (PRD requirement)
 
@@ -158,7 +196,7 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    cout << "[GCS] Mission profile loaded\n";
+    // cout << "[GCS] Mission profile loaded\n";
 
     // Video link selection (security flag gated)
     if (SecurityManager::enabled()) {
@@ -210,6 +248,14 @@ int main(int argc, char* argv[]) {
     // Command sender
     MavlinkCommandSender* cmdSender = nullptr;
     bool sender_initialized = false;
+    bool mission_upload_started = false;
+    bool mission_upload_complete = false;
+    bool mission_upload_failed = false;
+    bool mission_clear_sent = false;
+    int mission_upload_retries = 0;
+    int mission_waypoints_sent = 0;
+    auto mission_upload_start = chrono::steady_clock::now();
+    auto next_mission_retry_at = chrono::steady_clock::now();
 
     uint8_t buffer[2048];
 
@@ -242,7 +288,79 @@ int main(int argc, char* argv[]) {
 
             commandManager.setCommandSender(cmdSender);
             sender_initialized = true;
-            cout << "[GCS] Command sender initialized\n";
+            // cout << "[GCS] Command sender initialized\n";
+        }
+
+        // ---------- MISSION UPLOAD HANDSHAKE ----------
+        if (sender_initialized && !mission_upload_started) {
+            if (!mission_clear_sent) {
+                cmdSender->sendMissionClearAll();
+                mission_clear_sent = true;
+                // cout << "[GCS] Mission clear all sent\n";
+            }
+            cmdSender->sendMissionCount(static_cast<uint16_t>(profile.waypoints.size()));
+            mission_upload_started = true;
+            telemetry.mission_upload_in_progress = true;
+            mission_upload_start = now;
+            next_mission_retry_at = now + chrono::milliseconds(MISSION_UPLOAD_BASE_BACKOFF_MS);
+            // cout << "[GCS] Mission upload started (MISSION_COUNT sent)\n";
+            writeMissionUploadStatus("config/mission_upload_status.json", "IN_PROGRESS", -1, mission_upload_retries);
+        }
+
+        if (mission_upload_started && !mission_upload_complete && !mission_upload_failed) {
+            if (now >= next_mission_retry_at && mission_upload_retries < MISSION_UPLOAD_MAX_RETRIES) {
+                cmdSender->sendMissionCount(static_cast<uint16_t>(profile.waypoints.size()));
+                mission_upload_retries++;
+                const int backoff_ms = computeMissionUploadBackoffMs(mission_upload_retries, MISSION_UPLOAD_BASE_BACKOFF_MS);
+                next_mission_retry_at = now + chrono::milliseconds(backoff_ms);
+                // cout << "[GCS] Mission upload retry (MISSION_COUNT resent)\n";
+                writeMissionUploadStatus("config/mission_upload_status.json", "IN_PROGRESS", -1, mission_upload_retries);
+            }
+
+            const auto total_elapsed = chrono::duration_cast<chrono::milliseconds>(now - mission_upload_start).count();
+            if (total_elapsed >= MISSION_UPLOAD_TIMEOUT_MS) {
+                mission_upload_failed = true;
+                telemetry.mission_upload_failed = true;
+                telemetry.mission_upload_in_progress = false;
+                // cout << "[GCS] Mission upload timeout\n";
+                writeMissionUploadStatus("config/mission_upload_status.json", "FAILED", -1, mission_upload_retries);
+            }
+        }
+
+        if (mission_upload_started && !mission_upload_complete && telemetry.mission_request_received) {
+            const uint16_t seq = telemetry.last_mission_request_seq;
+            telemetry.mission_request_received = false;
+            if (seq < profile.waypoints.size()) {
+                cmdSender->sendMissionItemInt(seq, profile.waypoints[seq], seq == 0, true);
+                // cout << "[GCS] Sent MISSION_ITEM_INT seq=" << seq << "\n";
+                mission_waypoints_sent = seq + 1;
+            } else {
+                // cout << "[GCS] Mission request out of range: " << seq << "\n";
+                cmdSender->sendMissionCount(static_cast<uint16_t>(profile.waypoints.size()));
+                next_mission_retry_at = now + chrono::milliseconds(MISSION_UPLOAD_BASE_BACKOFF_MS);
+            }
+        }
+
+        if (mission_upload_started && !mission_upload_complete && telemetry.last_mission_ack.valid) {
+            const uint8_t result = telemetry.last_mission_ack.type;
+            telemetry.last_mission_ack.valid = false;
+            
+            // Only accept mission complete if all waypoints have been sent
+            if (mission_waypoints_sent >= static_cast<int>(profile.waypoints.size())) {
+                if (result == MAV_MISSION_ACCEPTED) {
+                    mission_upload_complete = true;
+                    telemetry.mission_upload_complete = true;
+                    telemetry.mission_upload_in_progress = false;
+                    // cout << "[GCS] Mission upload accepted (" << mission_waypoints_sent << "/" << profile.waypoints.size() << " waypoints)\n";
+                    writeMissionUploadStatus("config/mission_upload_status.json", "ACCEPTED", result, mission_upload_retries);
+                } else {
+                    mission_upload_failed = true;
+                    telemetry.mission_upload_failed = true;
+                    telemetry.mission_upload_in_progress = false;
+                    // cout << "[GCS] Mission upload failed. ACK type=" << int(result) << "\n";
+                    writeMissionUploadStatus("config/mission_upload_status.json", "FAILED", result, mission_upload_retries);
+                }
+            }
         }
 
         // ---------- FAILSAFE CHECK ----------
@@ -281,8 +399,11 @@ int main(int argc, char* argv[]) {
         //              MISSION AUTHORITY LOOP
         // ====================================================
         if (!cmdSender ||
-            !telemetry.isTelemetryReady() ||
-            commandManager.hasActiveCommand())
+            !telemetry.isTelemetryReady())
+            continue;
+
+        // Skip mission control if command is active
+        if (commandManager.hasActiveCommand())
             continue;
 
         // 🔹 NEW: Mission-level autonomy binding
@@ -342,9 +463,37 @@ int main(int argc, char* argv[]) {
             }
             break;
 
-        
+        case mission::MissionState::ARM_REQUESTED:
+            if (mission.isStateNewlyEntered()) {
+                if (dispatchCommand(
+                    commandManager,
+                    VehicleCommand::ARM,
+                    stateManager.getState(),
+                    mission.state(),
+                    telemetry)) {
+                    mission.markStateHandled();
+                }
+            } else {
+                // Wait for ARM command to complete, then transition to ARMED
+                if (!commandManager.hasActiveCommand() && telemetry.arm_state == ArmState::ARMED) {
+                    MissionTransitionAuthority::requestTransition(
+                        mission,
+                        mission::MissionEvent::VEHICLE_ARMED);
+                }
+            }
+            break;
 
-        case mission::MissionState::TRANSIT:
+        case mission::MissionState::ARMED:
+            // Wait for operator to request mission start
+            if (mission.isStateNewlyEntered()) {
+                mission.markStateHandled();
+            }
+            
+            // Operator can trigger transition to TRANSIT
+            // This is typically done via MissionController or operator input
+            break;
+
+                case mission::MissionState::TRANSIT:
             if (mission.isStateNewlyEntered()) {
                 if (dispatchCommand(
                     commandManager,

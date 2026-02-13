@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <netinet/in.h>
 
+#include "mission/MissionProfile.h"
+
 extern "C" {
 #include "mavlink/common/mavlink.h"
 }
@@ -27,6 +29,13 @@ public:
 
     // Phase C: Search waypoint
     void sendSearchWaypoint(const GeoPoint& waypoint);
+
+    // Mission upload (Phase B integration)
+    void sendMissionUpload(const mission::MissionProfile& profile);
+    void sendMissionCount(uint16_t count);
+    void sendMissionItemInt(uint16_t seq, const GeoPoint& waypoint, bool isCurrent = false, bool autoContinue = true);
+    void sendMissionClearAll();
+    void sendMissionSetCurrent(uint16_t seq);
 
     // ---------- Generic command interface (Phase 4 / 5) ----------
     void sendRawCommand(uint16_t command) {

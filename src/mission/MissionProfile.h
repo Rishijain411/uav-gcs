@@ -62,6 +62,9 @@ struct MissionCrypto {
 
 // Mission Profile (PRD Phase 1)
 struct MissionProfile {
+    // Schema version (optional in JSON; defaults to 1)
+    int schema_version = 1;
+
     // Target identification (optional)
     std::optional<std::string> target_id;
     

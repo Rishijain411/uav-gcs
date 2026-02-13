@@ -250,14 +250,26 @@ void MissionController::handleSearch(
     }
 
     // --------------------------------------------------
-    // WAIT FOR POSITION
+    // MISSION UPLOADED MODE: Monitor PX4's autonomous execution
     // --------------------------------------------------
+    if (telemetry.mission_upload_complete) {
+        // Mission is uploaded to PX4, monitor via MISSION_CURRENT
+        if (telemetry.mission_current_received) {
+            std::cout << "[SEARCH] PX4 executing mission waypoint " << telemetry.mission_current_seq << "\n";
+        }
+        return;  // Don't send search waypoints; let PX4 execute uploaded mission
+    }
+
+    // --------------------------------------------------
+    // DYNAMIC WAYPOINT MODE: Generate and send waypoints via GCS
+    // (Only when mission is NOT uploaded)
+    // --------------------------------------------------
+    
+    // WAIT FOR POSITION
     if (!telemetry.position_received)
         return;
 
-    // --------------------------------------------------
     // If no active waypoint → generate first one
-    // --------------------------------------------------
     if (!current_waypoint_active_) {
 
         auto points = search_pattern_->next();
@@ -274,18 +286,16 @@ void MissionController::handleSearch(
         return;
     }
 
-    // --------------------------------------------------
     // Check if vehicle reached current waypoint
-    // --------------------------------------------------
     double dlat = telemetry.latitude_deg  - current_waypoint_.lat;
     double dlon = telemetry.longitude_deg - current_waypoint_.lon;
 
     double distance_sq = dlat*dlat + dlon*dlon;
 
-    // ~2m threshold in degrees (~1e-5 deg ≈ 1m)
-    constexpr double ARRIVAL_THRESHOLD = 1e-10;
+    // 5m threshold in degrees (~5e-5 deg ≈ 5m)
+    constexpr double ARRIVAL_THRESHOLD_SQ = 25e-10;  // (5e-5)^2
 
-    if (distance_sq < ARRIVAL_THRESHOLD) {
+    if (distance_sq < ARRIVAL_THRESHOLD_SQ) {
 
         current_waypoint_active_ = false;
 

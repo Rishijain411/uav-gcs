@@ -112,6 +112,22 @@ add_executable(test_pronav
     src/mission/engagement/ProportionalNavigation.cpp
 )
 
+# ---- Mission Upload Tests ----
+add_executable(test_mission_upload_handshake
+    src/test/test_mission_upload_handshake.cpp
+    src/command/MavlinkCommandSender.cpp
+    src/telemetry/TelemetryParser.cpp
+    src/comm/LinkManager.cpp
+    src/comm/UdpTransport.cpp
+    src/core/StateManager.cpp
+    src/security/SecureChannel.cpp
+)
+target_link_libraries(test_mission_upload_handshake PRIVATE OpenSSL::Crypto)
+
+add_executable(test_mission_upload_backoff
+    src/test/test_mission_upload_backoff.cpp
+)
+
 # =====================================================
 #                    REGISTER TESTS
 # =====================================================
@@ -123,6 +139,8 @@ add_test(NAME test_search_pattern COMMAND test_search_pattern)
 add_test(NAME test_engagement_policy COMMAND test_engagement_policy)
 add_test(NAME test_engagement_v2 COMMAND test_engagement_v2)
 add_test(NAME test_pronav COMMAND test_pronav)
+add_test(NAME test_mission_upload_handshake COMMAND test_mission_upload_handshake)
+add_test(NAME test_mission_upload_backoff COMMAND test_mission_upload_backoff)
 
 # =====================================================
 #                    Qt UI (OPTIONAL)
@@ -135,11 +153,29 @@ if(Qt6_FOUND)
     
     add_executable(gcs_ui
         src/ui/main_ui.cpp
-        src/ui/MainWindow_QGC.cpp
+        src/ui/MainWindow_QGC_v2.cpp
         src/ui/MainWindow_QGC.h
+        src/ui/GCSBackendInterface.cpp
+        src/ui/GCSBackendInterface.h
+        src/ui/IntegratedBackend.cpp
+        src/ui/IntegratedBackend.h
+        src/mission/Mission.cpp
+        src/mission/MissionController.cpp
+        src/mission/MissionProfileParser.cpp
+        src/mission/search/ExpandingSquarePattern.cpp
+        src/mission/engagement/EngagementPolicy.cpp
+        src/telemetry/TelemetryParser.cpp
+        src/command/MavlinkCommandSender.cpp
+        src/command/CommandManager.cpp
+        src/comm/LinkManager.cpp
+        src/comm/UdpTransport.cpp
+        src/comm/GcsHeartbeat.cpp
+        src/core/StateManager.cpp
+        src/security/SecureChannel.cpp
+        src/authority/OperatorAuthorization.cpp
     )
     
-    target_link_libraries(gcs_ui PRIVATE Qt6::Widgets)
+    target_link_libraries(gcs_ui PRIVATE Qt6::Widgets OpenSSL::Crypto)
     
     message(STATUS "gcs_ui target created - run with: ./gcs_ui")
 else()

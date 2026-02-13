@@ -1,37 +1,37 @@
 {
-  "target_id": "TARGET_001",
+  "target_id": "TEST_TARGET",
 
   "security": {
     "mode": "PLAINTEXT"
   },
 
   "crypto": {
-    "key_id": "MISSION_KEY_ALPHA",
+    "key_id": "TEST_KEY",
     "key_epoch": 1,
     "mission_key_hex": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
   },
 
   "search_area": {
     "vertices": [
-      [37.7749, -122.4194, 50.0],
-      [37.7750, -122.4190, 50.0],
-      [37.7755, -122.4190, 50.0],
-      [37.7754, -122.4194, 50.0]
+      [47.3982, 8.5456, 50.0],
+      [47.3990, 8.5456, 50.0],
+      [47.3990, 8.5470, 50.0],
+      [47.3982, 8.5470, 50.0]
     ],
     "min_altitude_m": 30.0,
     "max_altitude_m": 100.0
   },
 
   "waypoints": [
-    [0, 0, 50.0],
-    [10, 0, 60.0],
-    [10, 10, 70.0]
+    [47.3982, 8.5456, 50.0],
+    [47.3990, 8.5463, 60.0],
+    [47.3986, 8.5470, 55.0]
   ],
 
   "payload_policy": {
     "type": "KINETIC",
     "arm_on_engagement": true,
-    "arming_delay_seconds": 2.0
+    "arming_delay_seconds": 1.0
   },
 
   "failsafe_rules": {

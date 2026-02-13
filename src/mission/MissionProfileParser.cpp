@@ -33,6 +33,31 @@ namespace mission {
         // Reset profile
         profile = MissionProfile();
         
+        // Parse schema_version (optional, defaults to 1)
+        size_t schema_pos = json_content.find("\"schema_version\"");
+        if (schema_pos != std::string::npos) {
+            size_t colon_pos = json_content.find(':', schema_pos);
+            size_t num_start = colon_pos + 1;
+            // Skip whitespace
+            while (num_start < json_content.length() && 
+                   std::isspace(json_content[num_start])) {
+                num_start++;
+            }
+            size_t num_end = num_start;
+            while (num_end < json_content.length() && 
+                   std::isdigit(json_content[num_end])) {
+                num_end++;
+            }
+            if (num_end > num_start) {
+                try {
+                    profile.schema_version = std::stoi(
+                        json_content.substr(num_start, num_end - num_start));
+                } catch (...) {
+                    // Keep default value of 1
+                }
+            }
+        }
+        
         // Parse target_id (optional)
         size_t target_pos = json_content.find("\"target_id\"");
         if (target_pos != std::string::npos) {
@@ -369,6 +394,12 @@ namespace mission {
         const MissionProfile& profile,
         std::string& error_message)
     {
+        // Validate schema version
+        if (profile.schema_version != 1) {
+            error_message = "Unsupported schema_version";
+            return false;
+        }
+
         // Validate search area
         if (!profile.search_area.isValid()) {
             error_message = "Search area must have at least 3 vertices";

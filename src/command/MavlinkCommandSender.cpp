@@ -164,3 +164,141 @@ void MavlinkCommandSender::sendSearchWaypoint(const GeoPoint& waypoint) {
              << " bytes=" << sent << "\n";
     }
 }
+
+// --------------------------------------------------
+// Mission Upload (Phase B integration)
+// --------------------------------------------------
+void MavlinkCommandSender::sendMissionUpload(const mission::MissionProfile& profile) {
+    if (profile.waypoints.empty()) {
+        std::cerr << "[MISSION UPLOAD] No waypoints to upload\n";
+        return;
+    }
+
+    const uint16_t count = static_cast<uint16_t>(profile.waypoints.size());
+    sendMissionCount(count);
+
+    for (uint16_t i = 0; i < count; ++i) {
+        sendMissionItemInt(i, profile.waypoints[i], false, true);
+    }
+
+    std::cout << "[MISSION UPLOAD] Sent " << count << " waypoints (fire-and-forget)\n";
+}
+
+void MavlinkCommandSender::sendMissionCount(uint16_t count) {
+    mavlink_message_t msg;
+    uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
+
+    mavlink_msg_mission_count_pack(
+        GCS_SYS_ID,
+        GCS_COMP_ID,
+        &msg,
+        target_sysid,
+        MAV_COMP_ID_AUTOPILOT1,
+        count,
+        MAV_MISSION_TYPE_MISSION,
+        0
+    );
+
+    uint16_t len = mavlink_msg_to_send_buffer(buffer, &msg);
+    ssize_t sent = link_.send(
+        buffer,
+        len,
+        reinterpret_cast<sockaddr*>(&px4_addr),
+        sizeof(px4_addr)
+    );
+
+    if (sent < 0) {
+        perror("[GCS] sendMissionCount failed");
+    }
+}
+
+void MavlinkCommandSender::sendMissionItemInt(uint16_t seq, const GeoPoint& waypoint, bool isCurrent, bool autoContinue) {
+    mavlink_message_t msg;
+    uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
+
+    const int32_t lat_int = static_cast<int32_t>(waypoint.lat * 1e7);
+    const int32_t lon_int = static_cast<int32_t>(waypoint.lon * 1e7);
+    const float alt_m = static_cast<float>(waypoint.alt);
+
+    mavlink_msg_mission_item_int_pack(
+        GCS_SYS_ID,
+        GCS_COMP_ID,
+        &msg,
+        target_sysid,
+        MAV_COMP_ID_AUTOPILOT1,
+        seq,
+        MAV_FRAME_GLOBAL_RELATIVE_ALT,
+        MAV_CMD_NAV_WAYPOINT,
+        isCurrent ? 1 : 0,
+        autoContinue ? 1 : 0,
+        0, 0, 0, 0,
+        lat_int,
+        lon_int,
+        alt_m,
+        MAV_MISSION_TYPE_MISSION
+    );
+
+    uint16_t len = mavlink_msg_to_send_buffer(buffer, &msg);
+    ssize_t sent = link_.send(
+        buffer,
+        len,
+        reinterpret_cast<sockaddr*>(&px4_addr),
+        sizeof(px4_addr)
+    );
+
+    if (sent < 0) {
+        perror("[GCS] sendMissionItemInt failed");
+    }
+}
+
+void MavlinkCommandSender::sendMissionClearAll() {
+    mavlink_message_t msg;
+    uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
+
+    mavlink_msg_mission_clear_all_pack(
+        GCS_SYS_ID,
+        GCS_COMP_ID,
+        &msg,
+        target_sysid,
+        MAV_COMP_ID_AUTOPILOT1,
+        MAV_MISSION_TYPE_MISSION
+    );
+
+    uint16_t len = mavlink_msg_to_send_buffer(buffer, &msg);
+    ssize_t sent = link_.send(
+        buffer,
+        len,
+        reinterpret_cast<sockaddr*>(&px4_addr),
+        sizeof(px4_addr)
+    );
+
+    if (sent < 0) {
+        perror("[GCS] sendMissionClearAll failed");
+    }
+}
+
+void MavlinkCommandSender::sendMissionSetCurrent(uint16_t seq) {
+    mavlink_message_t msg;
+    uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
+
+    mavlink_msg_mission_set_current_pack(
+        GCS_SYS_ID,
+        GCS_COMP_ID,
+        &msg,
+        target_sysid,
+        MAV_COMP_ID_AUTOPILOT1,
+        seq
+    );
+
+    uint16_t len = mavlink_msg_to_send_buffer(buffer, &msg);
+    ssize_t sent = link_.send(
+        buffer,
+        len,
+        reinterpret_cast<sockaddr*>(&px4_addr),
+        sizeof(px4_addr)
+    );
+
+    if (sent < 0) {
+        perror("[GCS] sendMissionSetCurrent failed");
+    }
+}
