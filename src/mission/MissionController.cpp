@@ -30,6 +30,23 @@ void MissionController::update(
     const TelemetryData& telemetry)
 {
     // ==================================================
+    // 1. HEARTBEAT MONITOR (PRD: Comms Loss Fail-Safe)
+    // ==================================================
+    auto now = std::chrono::steady_clock::now();
+    auto hb_elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now - telemetry.last_heartbeat_time).count();
+
+    // If link is lost for > 2 seconds, trigger failsafe transition
+    if (hb_elapsed_ms > 2000 && mission.state() != mission::MissionState::INIT) {
+        MissionTransitionAuthority::requestTransition(
+            mission,
+            mission::MissionEvent::SYSTEM_FAILURE,
+            MissionAbortReason::COMMAND_TIMEOUT,
+            "Comms Loss: Heartbeat Timeout");
+        return;
+    }
+
+    // ==================================================
     // ARM_REQUESTED → send ARM command 
     // ==================================================
     if (mission.state() == mission::MissionState::ARM_REQUESTED &&
@@ -128,8 +145,6 @@ void MissionController::update(
         return;
     }
 
-
-
     // ==================================================
     // ABORT HANDLING
     // ==================================================
@@ -172,6 +187,15 @@ void MissionController::update(
         handleAssess(mission, telemetry);
         break;
 
+    case mission::MissionState::RTB:
+        // Monitor return journey and finalize on landing
+        if (telemetry.isLanded()) {
+            MissionTransitionAuthority::requestTransition(
+                mission,
+                mission::MissionEvent::MISSION_COMPLETE);
+        }
+        break;
+
     case mission::MissionState::COMPLETE:
     case mission::MissionState::ABORTED:
         handleRecovery(mission, telemetry);
@@ -202,12 +226,28 @@ void MissionController::handleSearch(
 
                 GeoPoint center = profile.waypoints[0];
 
-                search_pattern_ = std::make_unique<ExpandingSquarePattern>(
-                    center,
-                    100.0,
-                    50.0,
-                    8
-                );
+                // --------------------------------------------------
+                // PHASE 2: ADAPTIVE SEARCH PATTERN SELECTION
+                // --------------------------------------------------
+                // Reasoning: Sector search is optimized for concentrated loitering,
+                // while Expanding Square is best for wide-area coverage.
+                if (profile.search_radius < 200.0) {
+                    search_pattern_ = std::make_unique<SectorSearchPattern>(
+                        center,
+                        profile.search_radius
+                    );
+                    std::cout << "[SEARCH] Adaptive Choice: Sector Search Pattern (Radius: " 
+                              << profile.search_radius << "m)\n";
+                } 
+                else {
+                    search_pattern_ = std::make_unique<ExpandingSquarePattern>(
+                        center,
+                        100.0,  // initial side
+                        50.0,   // step size
+                        8       // max legs
+                    );
+                    std::cout << "[SEARCH] Adaptive Choice: Expanding Square Pattern\n";
+                }
             }
             else {
                 std::cout << "[SEARCH] No mission waypoints — aborting\n";
@@ -227,8 +267,6 @@ void MissionController::handleSearch(
 
         std::cout << "[SEARCH] Initialized from mission profile\n";
     }
-
-
 
     if (telemetry.target_detected) {
         MissionTransitionAuthority::requestTransition(
@@ -301,7 +339,6 @@ void MissionController::handleSearch(
 
         std::cout << "[SEARCH] Waypoint reached\n";
     }
-
 }
 /* ---------------- ENGAGE ---------------- */
 
@@ -309,6 +346,7 @@ void MissionController::handleEngage(
     mission::Mission& mission,
     const TelemetryData& telemetry)
 {
+    // PRD REQUIREMENT: Define track for "Kill Chain" evaluation
     TargetTrack track {
         telemetry.target_detected,
         telemetry.target_confidence,
@@ -316,38 +354,42 @@ void MissionController::handleEngage(
         telemetry.target_closing_speed
     };
 
-    if (!telemetry.target_detected ||
-        telemetry.target_closing_speed <= 0.0) {
-
+    // 1. VALIDATION: Check target presence and minimum closing speed threshold (5.0 m/s)
+    if (!telemetry.target_detected || !engagement_policy_.checkClosingSpeed(track)) {
         engagement_policy_.registerMiss();
 
         AuditLogger::logDecision(
             VehicleCommand::NONE,
             mission.state(),
             "ENGAGEMENT_MISS",
-            "Target lost or not closing");
+            "Target lost or insufficient closing speed");
 
         MissionTransitionAuthority::requestTransition(
             mission,
             mission::MissionEvent::ENGAGEMENT_FAILED);
-
         return;
     }
 
-    auto decision = engagement_policy_.evaluate(track);
+    // 2. POLICY EVALUATION: Check lock confidence and attempt counts
+    EngagementDecision decision = engagement_policy_.evaluate(track);
 
+    // 3. STRICT OITL (PRD: No "Ghost" Commands): Force authorization for initial strike
+    // If the policy suggests ENGAGE but we haven't attempted yet, treat as REQUEST_CONFIRM.
+    if (decision == EngagementDecision::ENGAGE && engagement_policy_.getAttemptCount() == 0) {
+        decision = EngagementDecision::REQUEST_CONFIRM;
+    }
+
+    // 4. AUTHORIZATION HANDLER
     if (decision == EngagementDecision::REQUEST_CONFIRM) {
-
         if (!OperatorAuthorization::hasPending()) {
-            OperatorAuthorization::request(
-                VehicleCommand::NONE,
-                mission.state());
+            OperatorAuthorization::request(VehicleCommand::NONE, mission.state());
             return;
         }
 
         auto auth = OperatorAuthorization::pollDecision();
-        if (!auth.has_value())
-            return;
+        if (!auth.has_value()) return;
+
+        OperatorAuthorization::consumeDecision(); // Clear request after decision
 
         if (!auth.value()) {
             MissionTransitionAuthority::requestTransition(
@@ -357,18 +399,43 @@ void MissionController::handleEngage(
             return;
         }
 
+        // Operator approved: move state to authorized engagement
         MissionTransitionAuthority::requestTransition(
             mission,
             mission::MissionEvent::OPERATOR_ENGAGE_CONFIRM);
-
+        
         decision = EngagementDecision::ENGAGE;
     }
 
-    if (decision == EngagementDecision::ABORT) {
-        MissionTransitionAuthority::requestTransition(
-            mission,
-            mission::MissionEvent::SYSTEM_FAILURE,
-            MissionAbortReason::SEARCH_EXHAUSTED);
+    // 5. PHASE 3: TERMINAL GUIDANCE (Proportional Navigation)
+    if (decision == EngagementDecision::ENGAGE || decision == EngagementDecision::REENGAGE) {
+        
+        // PHASE 3: Terminal Guidance Execution
+        // Map interceptor position and velocity from telemetry
+        Vector3D interceptor_pos(telemetry.latitude_deg, telemetry.longitude_deg, telemetry.relative_alt_m);
+        
+        // NOTE: Placeholder target_pos until Radar/AI data is added to TelemetryData.h
+        Vector3D target_pos(0, 0, 0); 
+        Vector3D interceptor_vel(0, 0, 0); // Requires NED velocities from telemetry
+        Vector3D target_vel(0, 0, 0);
+
+        Vector3D accel = pro_nav_.calculateAcceleration(
+            interceptor_pos,
+            target_pos,
+            interceptor_vel,
+            target_vel,
+            0.1 // 10Hz DT based on search_gen_interval_
+        );
+
+        if (cmd_manager_) {
+            cmd_manager_->sendAccelerationCommand(accel);
+        }
+
+        AuditLogger::logDecision(
+            VehicleCommand::NONE,
+            mission.state(),
+            "TERMINAL_GUIDANCE",
+            "Pro-Nav active: Accel Magnitude = " + std::to_string(accel.magnitude()));
     }
 }
 

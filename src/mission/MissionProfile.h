@@ -70,10 +70,13 @@ struct MissionProfile {
     
     // Search area (GPS polygon)
     SearchArea search_area;
+
+    // Added for Phase 2: Adaptive Search Patterns
+    double search_radius = 0.0;
     
     // Flight path waypoints
     std::vector<GeoPoint> waypoints;
-    
+
     // Payload configuration
     PayloadPolicy payload_policy;
     

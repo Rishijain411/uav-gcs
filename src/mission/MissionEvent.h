@@ -20,6 +20,7 @@ enum class MissionEvent {
     ENGAGEMENT_FAILED,
     BDA_EVALUATED,
 
+    MISSION_COMPLETE,
     RTB_COMPLETE,
     SYSTEM_FAILURE
 };

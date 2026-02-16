@@ -302,3 +302,27 @@ void MavlinkCommandSender::sendMissionSetCurrent(uint16_t seq) {
         perror("[GCS] sendMissionSetCurrent failed");
     }
 }
+void MavlinkCommandSender::sendAccelerationSetpoint(const Vector3D& accel) {
+    mavlink_message_t msg;
+    uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
+
+    // MAVLink type_mask: 0b0000110001111111 
+    // (Ignores Pos/Vel/Yaw, enables Accel AFX/AFY/AFZ)
+    uint16_t type_mask = 0b0000110001111111;
+
+    mavlink_msg_set_position_target_local_ned_pack(
+        GCS_SYS_ID, GCS_COMP_ID, &msg,
+        0, target_sysid, MAV_COMP_ID_AUTOPILOT1,
+        MAV_FRAME_LOCAL_NED,
+        type_mask,
+        0, 0, 0,    // x, y, z (ignored)
+        0, 0, 0,    // vx, vy, vz (ignored)
+        static_cast<float>(accel.x), 
+        static_cast<float>(accel.y), 
+        static_cast<float>(accel.z),
+        0, 0        // yaw, yaw_rate (ignored)
+    );
+
+    uint16_t len = mavlink_msg_to_send_buffer(buffer, &msg);
+    link_.send(buffer, len, reinterpret_cast<sockaddr*>(&px4_addr), sizeof(px4_addr));
+}

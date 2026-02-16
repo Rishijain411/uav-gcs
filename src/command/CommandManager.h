@@ -9,7 +9,7 @@
 #include "telemetry/TelemetryData.h"
 #include "mission/MissionState.h"
 #include "mission/search/SearchPattern.h"
-
+#include "mission/engagement/ProportionalNavigation.h"
 class MavlinkCommandSender;
 
 class CommandManager {
@@ -33,7 +33,7 @@ public:
 
     bool hasActiveCommand() const;
 
-    // ✅ NEW: timeout status (for MissionController)
+    // NEW: timeout status (for MissionController)
     bool hasCommandTimedOut() const { return command_timed_out_; }
 
     // Phase C: Search waypoint publishing
@@ -42,6 +42,7 @@ public:
     void setCommandSender(MavlinkCommandSender* sender) {
         sender_ = sender;
     }
+    void sendAccelerationCommand(const Vector3D& accel);
 
 private:
     struct TrackedCommand {
@@ -63,6 +64,6 @@ private:
     std::optional<TrackedCommand> active_command_;
     MavlinkCommandSender* sender_ = nullptr;
 
-    // ✅ NEW
+    
     bool command_timed_out_ = false;
 };

@@ -260,3 +260,7 @@ uint16_t CommandManager::mapToMavlinkCommand(
 bool CommandManager::hasActiveCommand() const {
     return active_command_.has_value();
 }
+void CommandManager::sendAccelerationCommand(const Vector3D& accel) {
+    if (!sender_) return;
+    sender_->sendAccelerationSetpoint(accel);
+}

@@ -16,7 +16,9 @@ class CommandManager;
 #include "authority/MissionTransitionAuthority.h"
 #include "mission/search/SearchPattern.h"
 #include "mission/search/ExpandingSquarePattern.h"
+#include "mission/search/SectorSearchPattern.h"
 #include "mission/engagement/EngagementPolicy.h"
+#include "mission/engagement/ProportionalNavigation.h"
 #include "authority/OperatorAuthorization.h"
 #include "authority/AuditLogger.h"
 #include "mission/BDAResult.h"
@@ -41,6 +43,7 @@ private:
     unique_ptr<SearchPattern> search_pattern_;
     EngagementPolicy engagement_policy_;
     CommandManager* cmd_manager_ = nullptr;
+    ProportionalNavigation pro_nav_;
     // Phase 4.1 — BDA tracking
     std::chrono::steady_clock::time_point assess_start_time_;
     int stable_frames_ = 0;

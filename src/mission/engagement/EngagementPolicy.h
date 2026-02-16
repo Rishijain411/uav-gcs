@@ -37,6 +37,7 @@ public:
     
     // Check if max attempts reached
     bool hasExhaustedAttempts() const { return attempts_ >= config_.max_reengagement_attempts; }
+    bool checkClosingSpeed(const TargetTrack& track);
 
 private:
     EngagementConfig config_;
@@ -44,6 +45,5 @@ private:
     
     bool checkLockConfidence(const TargetTrack& track);
     bool checkRange(const TargetTrack& track);
-    bool checkClosingSpeed(const TargetTrack& track);
 };
 

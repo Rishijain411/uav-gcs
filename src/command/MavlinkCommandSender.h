@@ -4,7 +4,7 @@
 #include <netinet/in.h>
 
 #include "mission/MissionProfile.h"
-
+#include "mission/engagement/ProportionalNavigation.h"
 extern "C" {
 #include "mavlink/common/mavlink.h"
 }
@@ -36,7 +36,7 @@ public:
     void sendMissionItemInt(uint16_t seq, const GeoPoint& waypoint, bool isCurrent = false, bool autoContinue = true);
     void sendMissionClearAll();
     void sendMissionSetCurrent(uint16_t seq);
-
+    void sendAccelerationSetpoint(const Vector3D& accel);
     // ---------- Generic command interface (Phase 4 / 5) ----------
     void sendRawCommand(uint16_t command) {
         sendCommand(command);

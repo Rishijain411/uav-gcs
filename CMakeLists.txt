@@ -11,7 +11,7 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 # =====================================================
-#                    GLOBAL INCLUDES
+#                     GLOBAL INCLUDES
 # =====================================================
 include_directories(
     ${PROJECT_SOURCE_DIR}/src
@@ -19,12 +19,12 @@ include_directories(
 )
 
 # =====================================================
-#                    DEPENDENCIES
+#                     DEPENDENCIES
 # =====================================================
 find_package(OpenSSL REQUIRED)
 
 # =====================================================
-#                    MAIN GCS TARGET
+#                     MAIN GCS TARGET
 # =====================================================
 add_executable(my_gcs
     src/main.cpp
@@ -54,7 +54,9 @@ add_executable(my_gcs
 
     # ---------------- Mission Logic ----------------
     src/mission/search/ExpandingSquarePattern.cpp
+    src/mission/search/SectorSearchPattern.cpp        # NEW: Added to support Phase 2 Adaptive Search
     src/mission/engagement/EngagementPolicy.cpp
+    src/mission/engagement/ProportionalNavigation.cpp # NEW: Added to support Phase 3 Terminal Guidance
 
     # ---------------- Phase B: Mission Planning ----------------
     src/mission/MissionProfileParser.cpp
@@ -72,7 +74,7 @@ add_executable(my_gcs
 # OpenSSL (Security)
 target_link_libraries(my_gcs PRIVATE OpenSSL::Crypto)
 # =====================================================
-#                    TEST TARGETS
+#                     TEST TARGETS
 # =====================================================
 
 # ---- Mission State Machine Test ----
@@ -92,18 +94,21 @@ add_executable(test_mission_transition
 add_executable(test_search_pattern
     src/test/test_search_pattern.cpp
     src/mission/search/ExpandingSquarePattern.cpp
+    src/mission/search/SectorSearchPattern.cpp
 )
 
 # ---- Engagement Policy Test ----
 add_executable(test_engagement_policy
     src/test/test_engagement_policy.cpp
     src/mission/engagement/EngagementPolicy.cpp
+    src/mission/engagement/ProportionalNavigation.cpp
 )
 
 # ---- Engagement Policy V2 Test (with ProNav) ----
 add_executable(test_engagement_v2
     src/test/test_engagement_policy_v2.cpp
     src/mission/engagement/EngagementPolicy.cpp
+    src/mission/engagement/ProportionalNavigation.cpp # NEW: Added to fix linker error in V2 test suite
 )
 
 # ---- ProNav Test ----
@@ -129,7 +134,7 @@ add_executable(test_mission_upload_backoff
 )
 
 # =====================================================
-#                    REGISTER TESTS
+#                     REGISTER TESTS
 # =====================================================
 enable_testing()
 
@@ -143,7 +148,7 @@ add_test(NAME test_mission_upload_handshake COMMAND test_mission_upload_handshak
 add_test(NAME test_mission_upload_backoff COMMAND test_mission_upload_backoff)
 
 # =====================================================
-#                    Qt UI (OPTIONAL)
+#                     Qt UI (OPTIONAL)
 # =====================================================
 # Find Qt6 for UI application
 find_package(Qt6 COMPONENTS Widgets QUIET)
@@ -163,7 +168,9 @@ if(Qt6_FOUND)
         src/mission/MissionController.cpp
         src/mission/MissionProfileParser.cpp
         src/mission/search/ExpandingSquarePattern.cpp
+        src/mission/search/SectorSearchPattern.cpp
         src/mission/engagement/EngagementPolicy.cpp
+        src/mission/engagement/ProportionalNavigation.cpp
         src/telemetry/TelemetryParser.cpp
         src/command/MavlinkCommandSender.cpp
         src/command/CommandManager.cpp
