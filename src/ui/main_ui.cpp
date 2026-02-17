@@ -41,6 +41,20 @@ int main(int argc, char *argv[]) {
     QObject::connect(backend_interface, &GCSBackendInterface::missionUploadSuccess,
                     &window, &MainWindow::onMissionUploadSuccess);
     
+    // Recovery & RTB connections (New)
+    QObject::connect(backend_interface, &GCSBackendInterface::commsLossDetected,
+                    &window, &MainWindow::onCommsLoss);
+    QObject::connect(backend_interface, &GCSBackendInterface::bdaAssessmentStarted,
+                    &window, &MainWindow::onBDAStarted);
+    QObject::connect(backend_interface, &GCSBackendInterface::bdaResult,
+                    &window, &MainWindow::onBDAResult);
+    QObject::connect(backend_interface, &GCSBackendInterface::rtbInitiated,
+                    &window, &MainWindow::onRTBStarted);
+    QObject::connect(backend_interface, &GCSBackendInterface::landingDetected,
+                    &window, &MainWindow::onLandingDetected);
+    QObject::connect(backend_interface, &GCSBackendInterface::missionCompleted,
+                    &window, &MainWindow::onMissionCompleted);
+    
     // Set backend pointer in MainWindow for direct control
     window.setBackend(backend);
     

@@ -74,3 +74,45 @@ void GCSBackendInterface::onCommandExecuted(const QString& command_name, bool su
 void GCSBackendInterface::onError(const QString& error_message) {
     emit errorOccurred(error_message);
 }
+
+// Recovery callbacks (New)
+void GCSBackendInterface::onCommsLoss() {
+    std::cout << "[UI] Comms loss detected!\n";
+    emit commsLossDetected();
+    emit statusUpdated("COMMS LOSS - Initiating recovery");
+}
+
+void GCSBackendInterface::onBDAStarted() {
+    std::cout << "[UI] Battle Damage Assessment started\n";
+    emit bdaAssessmentStarted();
+    emit statusUpdated("Running BDA...");
+}
+
+void GCSBackendInterface::onBDAComplete(const QString& health_status) {
+    std::cout << "[UI] BDA complete: " << health_status.toStdString() << "\n";
+    emit bdaResult(health_status);
+    emit statusUpdated("BDA: " + health_status);
+}
+
+void GCSBackendInterface::onRTBInitiated(const QString& reason) {
+    std::cout << "[UI] RTB initiated: " << reason.toStdString() << "\n";
+    emit rtbInitiated(reason);
+    emit statusUpdated("Returning to Base - " + reason);
+}
+
+void GCSBackendInterface::onRecoveryPlanUpdated(const QString& plan) {
+    std::cout << "[UI] Recovery plan: " << plan.toStdString() << "\n";
+    emit recoveryPlanUpdated(plan);
+}
+
+void GCSBackendInterface::onLandingDetected() {
+    std::cout << "[UI] Landing detected!\n";
+    emit landingDetected();
+    emit statusUpdated("LANDED");
+}
+
+void GCSBackendInterface::onMissionCompleted() {
+    std::cout << "[UI] Mission completed!\n";
+    emit missionCompleted();
+    emit statusUpdated("MISSION COMPLETE");
+}

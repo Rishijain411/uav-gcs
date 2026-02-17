@@ -9,6 +9,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QFile>
+#include <limits>
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     setupUI();
@@ -74,6 +75,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         if (takeoffHoldMs_ >= takeoffHoldRequiredMs_) {
             takeoffHoldTimer->stop();
             if (btnTakeoff) btnTakeoff->setText("TAKEOFF CONFIRMED");
+            if (takeoffHoldProgress) {
+                takeoffHoldProgress->setValue(0);  // Reset to 0
+                takeoffHoldProgress->hide();        // Hide the green bar
+            }
             onTakeoffClicked();
         }
     });
@@ -165,6 +170,7 @@ void MainWindow::setupUI() {
             "QTabBar::tab:selected { background: #F3F4F6; color: #111827; }"
             "QPushButton { background-color: #FFFFFF; border: 1px solid #E5E7EB; padding: 8px 16px; color: #000000; border-radius: 8px; font-size: 14px; font-weight: 500; }"
             "QPushButton:hover { background-color: #F3F4F6; }"
+            "QPushButton:disabled { background-color: #E5E7EB; color: #9CA3AF; border: 1px solid #D1D5DB; }"
             "QFrame#sidebar QPushButton { background-color: #FFFFFF; border: 1px solid #E5E7EB; color: #111827; font-size: 14px; padding: 8px 16px; }"
             "QFrame#sidebar QPushButton:hover { background-color: #F3F4F6; }"
             "QPushButton#engageButton { background-color: #111827; border: 1px solid #111827; color: #FFFFFF; }"
@@ -836,30 +842,46 @@ void MainWindow::updateDisplay() {
     static int counter = 0;
     counter++;
 
-    const bool anyEngage = false; // Will be set by backend signals
-    const bool anySearch = false; // Will be set by backend signals
+    const bool anyEngage = (lastMissionState_ == "ENGAGE");
+    const bool anySearch = (lastMissionState_ == "SEARCH" || lastMissionState_ == "TRANSIT");
     if (anyEngage) {
-        lblMissionStatus->setText("ENGAGE");
-        lblMissionStatus->setStyleSheet("QLabel { color: #10B981; }");
-        lblMissionState->setText("Mission: ENGAGING");
-        lblEngageBanner->setVisible(true);
-        lblPhaseInit->setStyleSheet("QLabel { color: #6B7280; }");
-        lblPhaseArm->setStyleSheet("QLabel { color: #6B7280; }");
-        lblPhaseSearch->setStyleSheet("QLabel { color: #6B7280; }");
-        lblPhaseEngage->setStyleSheet("QLabel { color: #10B981; font-weight: 700; }");
-        lblPhaseRtl->setStyleSheet("QLabel { color: #6B7280; }");
-        lblLockOverlay->setStyleSheet("QLabel { color: #111827; border: 2px solid #111827; border-radius: 80px; }");
+        if (lblMissionStatus) {
+            lblMissionStatus->setText("STATUS: ENGAGE");
+            lblMissionStatus->setStyleSheet("QLabel { color: #DC2626; font-weight: bold; }");
+        }
+        if (lblMissionState) {
+            lblMissionState->setText("Mission: ENGAGING");
+        }
+        if (lblEngageBanner) {
+            lblEngageBanner->setVisible(true);
+        }
+        if (lblPhaseInit) lblPhaseInit->setStyleSheet("QLabel { color: #6B7280; }");
+        if (lblPhaseArm) lblPhaseArm->setStyleSheet("QLabel { color: #6B7280; }");
+        if (lblPhaseSearch) lblPhaseSearch->setStyleSheet("QLabel { color: #6B7280; }");
+        if (lblPhaseEngage) lblPhaseEngage->setStyleSheet("QLabel { color: #DC2626; font-weight: 700; }");
+        if (lblPhaseRtl) lblPhaseRtl->setStyleSheet("QLabel { color: #6B7280; }");
+        if (lblLockOverlay) {
+            lblLockOverlay->setStyleSheet("QLabel { color: #111827; border: 2px solid #111827; border-radius: 80px; }");
+        }
     } else if (anySearch) {
-        lblMissionStatus->setText("SEARCH");
-        lblMissionStatus->setStyleSheet("QLabel { color: #10B981; }");
-        lblMissionState->setText("Mission: SEARCHING");
-        lblEngageBanner->setVisible(false);
-        lblPhaseInit->setStyleSheet("QLabel { color: #10B981; font-weight: 700; }");
-        lblPhaseArm->setStyleSheet("QLabel { color: #6B7280; }");
-        lblPhaseSearch->setStyleSheet("QLabel { color: #10B981; font-weight: 700; }");
-        lblPhaseEngage->setStyleSheet("QLabel { color: #6B7280; }");
-        lblPhaseRtl->setStyleSheet("QLabel { color: #6B7280; }");
-        lblLockOverlay->setStyleSheet("QLabel { color: #111827; border: 2px dashed #111827; border-radius: 80px; }");
+        if (lblMissionStatus) {
+            lblMissionStatus->setText("STATUS: SEARCH");
+            lblMissionStatus->setStyleSheet("QLabel { color: #8B5CF6; font-weight: bold; }");
+        }
+        if (lblMissionState) {
+            lblMissionState->setText("Mission: SEARCHING");
+        }
+        if (lblEngageBanner) {
+            lblEngageBanner->setVisible(false);
+        }
+        if (lblPhaseInit) lblPhaseInit->setStyleSheet("QLabel { color: #10B981; font-weight: 700; }");
+        if (lblPhaseArm) lblPhaseArm->setStyleSheet("QLabel { color: #6B7280; }");
+        if (lblPhaseSearch) lblPhaseSearch->setStyleSheet("QLabel { color: #8B5CF6; font-weight: 700; }");
+        if (lblPhaseEngage) lblPhaseEngage->setStyleSheet("QLabel { color: #6B7280; }");
+        if (lblPhaseRtl) lblPhaseRtl->setStyleSheet("QLabel { color: #6B7280; }");
+        if (lblLockOverlay) {
+            lblLockOverlay->setStyleSheet("QLabel { color: #111827; border: 2px dashed #111827; border-radius: 80px; }");
+        }
     }
 
 
@@ -867,14 +889,7 @@ void MainWindow::updateDisplay() {
     lblTargetLock->setText("Target Lock: —");
     lblTargetLock->setStyleSheet("QLabel { color: #6B7280; }");
 
-    chkMotors->setChecked(true);
-    chkBattery->setChecked(true);
-    chkMavlink->setChecked(true);
-    chkPayload->setChecked(false);
-
-    chkBdaMotors->setChecked(true);
-    chkBdaLink->setChecked(false);
-    chkBdaPayload->setChecked(true);
+    // Avoid overwriting preflight/BDA checkboxes every tick.
 
     if (counter % 5 == 0) {
         QFile statusFile("config/mission_upload_status.json");
@@ -884,15 +899,17 @@ void MainWindow::updateDisplay() {
             const QString status = obj.value("status").toString();
             const int ackType = obj.value("ack_type").toInt(-1);
 
+            MissionUploadStatus newStatus = MissionUploadStatus::NOT_LOADED;
             if (status == "IN_PROGRESS") {
-                missionUploadStatus_ = MissionUploadStatus::IN_PROGRESS;
+                newStatus = MissionUploadStatus::IN_PROGRESS;
             } else if (status == "ACCEPTED") {
-                missionUploadStatus_ = MissionUploadStatus::ACCEPTED;
+                newStatus = MissionUploadStatus::ACCEPTED;
             } else if (status == "FAILED") {
-                missionUploadStatus_ = MissionUploadStatus::FAILED;
+                newStatus = MissionUploadStatus::FAILED;
             }
 
-            if (missionUploadStatus_ != lastLoggedMissionUploadStatus_) {
+            if (newStatus != missionUploadStatus_) {
+                missionUploadStatus_ = newStatus;
                 switch (missionUploadStatus_) {
                     case MissionUploadStatus::IN_PROGRESS:
                         appendAuditLog("[MISSION] Upload in progress", "#D97706");
@@ -906,7 +923,6 @@ void MainWindow::updateDisplay() {
                     case MissionUploadStatus::NOT_LOADED:
                         break;
                 }
-                lastLoggedMissionUploadStatus_ = missionUploadStatus_;
             }
         }
     }
@@ -915,15 +931,19 @@ void MainWindow::updateDisplay() {
         switch (missionUploadStatus_) {
             case MissionUploadStatus::IN_PROGRESS:
                 lblMissionSummaryStatus->setText("Upload Status: IN-PROGRESS");
+                lblMissionSummaryStatus->setStyleSheet("QLabel { color: #D97706; font-weight: bold; }");
                 break;
             case MissionUploadStatus::ACCEPTED:
-                lblMissionSummaryStatus->setText("Upload Status: ACCEPTED");
+                lblMissionSummaryStatus->setText("Upload Status: ACCEPTED ✓");
+                lblMissionSummaryStatus->setStyleSheet("QLabel { color: #10B981; font-weight: bold; }");
                 break;
             case MissionUploadStatus::FAILED:
-                lblMissionSummaryStatus->setText("Upload Status: FAILED");
+                lblMissionSummaryStatus->setText("Upload Status: FAILED ✗");
+                lblMissionSummaryStatus->setStyleSheet("QLabel { color: #EF4444; font-weight: bold; }");
                 break;
             case MissionUploadStatus::NOT_LOADED:
                 lblMissionSummaryStatus->setText("Upload Status: NOT LOADED");
+                lblMissionSummaryStatus->setStyleSheet("QLabel { color: #6B7280; }");
                 break;
         }
     }
@@ -936,13 +956,32 @@ void MainWindow::updateDisplay() {
         btnArm->setEnabled(missionProfileLoaded_ && preflightConfirmed_ && !armConfirmed_);
     }
     if (btnTakeoff) {
-        btnTakeoff->setEnabled(missionProfileLoaded_ && preflightConfirmed_ && armConfirmed_);
+        btnTakeoff->setEnabled(missionProfileLoaded_ && preflightConfirmed_ && armConfirmed_ && !takeoffConfirmed_);
     }
     if (btnAbort) {
         btnAbort->setEnabled(missionProfileLoaded_);
     }
     if (btnEngageHold) {
         btnEngageHold->setEnabled(missionProfileLoaded_ && preflightConfirmed_ && armConfirmed_);
+    }
+    
+    // RTB recovery buttons - enabled whenever mission is loaded (for emergency use)
+    // Primary: mission loaded flag, Secondary: active mission states
+    bool missionActive = missionProfileLoaded_ || 
+                         (lastMissionState_ == "PREFLIGHT" ||
+                          lastMissionState_ == "ARM_REQUESTED" ||
+                          lastMissionState_ == "ARMED" ||
+                          lastMissionState_ == "TRANSIT" || 
+                          lastMissionState_ == "SEARCH" || 
+                          lastMissionState_ == "ENGAGE" || 
+                          lastMissionState_ == "ASSESS" || 
+                          lastMissionState_ == "RTB");
+    
+    if (btnRtl) {
+        btnRtl->setEnabled(missionActive);
+    }
+    if (btnLand) {
+        btnLand->setEnabled(missionActive);
     }
 }
 
@@ -1013,6 +1052,7 @@ void MainWindow::onTakeoffClicked() {
     }
     setCommandPending(btnTakeoff, "TAKEOFF");
     appendAuditLog("[REQUEST] TAKEOFF", "#D97706");
+    takeoffConfirmed_ = true;
     
     // Send TAKEOFF command to backend
     if (backend_) {
@@ -1045,7 +1085,12 @@ void MainWindow::onTakeoffHoldRelease() {
 }
 
 void MainWindow::onLandClicked() {
-    appendAuditLog("[SYSTEM] LAND", "#E2E8F0");
+    appendAuditLog("[SYSTEM] Emergency LAND requested", "#E2E8F0");
+    
+    // Send to backend
+    if (backend_) {
+        backend_->sendLandCommand();
+    }
 }
 
 void MainWindow::onAbortClicked() {
@@ -1080,7 +1125,12 @@ void MainWindow::onAbortHoldRelease() {
 }
 
 void MainWindow::onRtlClicked() {
-    appendAuditLog("[SYSTEM] RTL", "#E2E8F0");
+    appendAuditLog("[SYSTEM] RTL (Return to Launch) requested", "#E2E8F0");
+    
+    // Send to backend
+    if (backend_) {
+        backend_->sendRtlCommand();
+    }
 }
 
 void MainWindow::onApproveClicked() {
@@ -1135,6 +1185,8 @@ void MainWindow::onMissionProfileUpload() {
     missionProfileLoaded_ = true;
     preflightConfirmed_ = false;
     armConfirmed_ = false;
+    takeoffConfirmed_ = false;
+    lastWaypointSeq_ = std::numeric_limits<uint16_t>::max();
     hasMissionChecksum_ = true;
     lastMissionChecksum_ = newChecksum;
     missionUploadStatus_ = MissionUploadStatus::IN_PROGRESS;
@@ -1331,7 +1383,13 @@ void MainWindow::setCommandAcked(QPushButton* button, const QString& baseText) {
     if (!button) return;
     button->setText(baseText + " ✓");
     button->setEnabled(true);
-    appendAuditLog("[ACK] " + baseText + " accepted", "#4ADE80");
+    QString ackColor = "#4ADE80";
+    if (baseText == "TAKEOFF") {
+        ackColor = "#F59E0B";
+    } else if (baseText == "ABORT") {
+        ackColor = "#EF4444";
+    }
+    appendAuditLog("[ACK] " + baseText + " accepted", ackColor);
 
     QTimer::singleShot(1200, this, [this, button, baseText]() {
         resetCommandButton(button, baseText);
@@ -1373,6 +1431,23 @@ void MainWindow::onMissionStateChanged(const QString& state) {
         lblMissionState->setStyleSheet("QLabel { color: " + color + "; font-weight: bold; font-size: 14px; }");
     }
     
+    if (lblMissionStatus) {
+        lblMissionStatus->setText("STATUS: " + state);
+        QString statusColor = "#111827";
+        if (state == "INIT") statusColor = "#6B7280";
+        else if (state == "PREFLIGHT") statusColor = "#F59E0B";
+        else if (state == "ARM_REQUESTED") statusColor = "#FB923C";
+        else if (state == "ARMED") statusColor = "#10B981";
+        else if (state == "TRANSIT") statusColor = "#3B82F6";
+        else if (state == "SEARCH") statusColor = "#8B5CF6";
+        else if (state == "ENGAGE") statusColor = "#DC2626";
+        else if (state == "ASSESS") statusColor = "#EA580C";
+        else if (state == "RTB") statusColor = "#14B8A6";
+        else if (state == "COMPLETE") statusColor = "#059669";
+        else if (state == "ABORTED") statusColor = "#7F1D1D";
+        lblMissionStatus->setStyleSheet("QLabel { color: " + statusColor + "; font-weight: bold; }");
+    }
+
     appendAuditLog("[STATE] Mission transitioned to: " + state, "#4ADE80");
 }
 
@@ -1402,7 +1477,13 @@ void MainWindow::updateFlightMode(const QString& mode) {
 
 void MainWindow::onMissionUploadSuccess() {
     missionProfileLoaded_ = true;
+    missionUploadStatus_ = MissionUploadStatus::ACCEPTED;
+    lastErrorMessage_.clear();
+    if (lblMissionSummaryStatus) {
+        lblMissionSummaryStatus->setText("Upload Status: ACCEPTED ✓");
+    }
     appendAuditLog("[SYSTEM] Mission upload complete - preflight enabled", "#4ADE80");
+    appendAuditLog("[INFO] For SITL testing: Use 'commander arm' in PX4 terminal after GPS lock", "#6B7280");
 }
 
 void MainWindow::updateArmState(bool armed) {
@@ -1412,19 +1493,23 @@ void MainWindow::updateArmState(bool armed) {
                                       : "QLabel { color: #6B7280; font-weight: bold; }");
     }
     
-    // Update internal state based on vehicle feedback
-    if (armed) {
+    // Update internal state based on vehicle feedback - only log on state change
+    if (armed && !armConfirmed_) {
+        // Transition from disarmed to armed
         armConfirmed_ = true;
         if (btnArm) btnArm->setText("ARM ✓");
         appendAuditLog("[ARMED] Vehicle armed successfully", "#10B981");
-    } else {
+    } else if (!armed && armConfirmed_) {
+        // Transition from armed to disarmed
         armConfirmed_ = false;
+        takeoffConfirmed_ = false;
         if (btnArm) {
             btnArm->setText("ARM");
             btnArm->setEnabled(true);
         }
         if (btnTakeoff) btnTakeoff->setText("TAKEOFF");
         if (armHoldProgress) armHoldProgress->setValue(0);
+        appendAuditLog("[DISARMED] Vehicle disarmed", "#F59E0B");
     }
     
     if (btnDisarm && armed) {
@@ -1448,10 +1533,12 @@ void MainWindow::updateBatteryDisplay(int percent) {
 }
 
 void MainWindow::updateMissionUploadProgress(int sent, int total) {
-    if (total > 0) {
+    if (total > 0 && (sent != lastUploadSent_ || total != lastUploadTotal_)) {
         int progress = (sent * 100) / total;
-        appendAuditLog("[UPLOAD] Mission: " + QString::number(sent) + "/" + QString::number(total) 
+        appendAuditLog("[UPLOAD] Mission: " + QString::number(sent) + "/" + QString::number(total)
                       + " waypoints (" + QString::number(progress) + "%)", "#3B82F6");
+        lastUploadSent_ = sent;
+        lastUploadTotal_ = total;
     }
 }
 
@@ -1459,13 +1546,85 @@ void MainWindow::updateCurrentWaypoint(uint16_t seq) {
     if (lblSearchPath) {
         lblSearchPath->setText("Current Waypoint: " + QString::number(seq));
     }
-    appendAuditLog("[SEARCH] PX4 executing waypoint sequence: " + QString::number(seq), "#8B5CF6");
+    if (seq != lastWaypointSeq_) {
+        appendAuditLog("[SEARCH] PX4 executing waypoint sequence: " + QString::number(seq), "#8B5CF6");
+        lastWaypointSeq_ = seq;
+    }
 }
 
 void MainWindow::displayError(const QString& error) {
-    appendAuditLog("[ERROR] " + error, "#DC2626");
-    if (lblMissionStatus) {
-        lblMissionStatus->setText("STATUS: ERROR");
-        lblMissionStatus->setStyleSheet("QLabel { color: #DC2626; font-weight: bold; }");
+    if (lastErrorMessage_ != error) {
+        appendAuditLog("[ERROR] " + error, "#DC2626");
+        lastErrorMessage_ = error;
     }
+    // Don't overwrite mission status - errors will show in audit log only
+}
+
+// === Recovery & RTB Slots (New) ===
+
+void MainWindow::onCommsLoss() {
+    appendAuditLog("[ALERT] COMMS LOSS DETECTED - Initiating failsafe", "#EF4444");
+    if (lblMissionStatus) {
+        lblMissionStatus->setText("COMMS LOSS - FAILSAFE");
+        lblMissionStatus->setStyleSheet("QLabel { color: #EF4444; font-weight: bold; animation: blink 1s infinite; }");
+    }
+    if (lblConnection) {
+        lblConnection->setText("LINK: LOST");
+        lblConnection->setStyleSheet("QLabel { color: #EF4444; font-weight: bold; }");
+    }
+}
+
+void MainWindow::onBDAStarted() {
+    appendAuditLog("[BDA] Battle Damage Assessment started", "#FBBF24");
+    if (lblMissionStatus) {
+        lblMissionStatus->setText("STATUS: BDA IN PROGRESS");
+        lblMissionStatus->setStyleSheet("QLabel { color: #FBBF24; font-weight: bold; }");
+    }
+}
+
+void MainWindow::onBDAResult(const QString& health_status) {
+    QString color;
+    if (health_status == "MISSION_WORTHY") {
+        color = "#10B981";
+        appendAuditLog("[BDA] Result: MISSION WORTHY ✓ - Vehicle healthy, can continue if needed", color);
+    } else if (health_status == "DEGRADED") {
+        color = "#FBBF24";
+        appendAuditLog("[BDA] Result: DEGRADED ⚠ - Vehicle damaged but operational", color);
+    } else {  // CRITICAL
+        color = "#EF4444";
+        appendAuditLog("[BDA] Result: CRITICAL ✗ - Vehicle compromised, initiating RTB", color);
+    }
+    
+    if (lblMissionStatus) {
+        lblMissionStatus->setText("BDA: " + health_status);
+        lblMissionStatus->setStyleSheet("QLabel { color: " + color + "; font-weight: bold; }");
+    }
+}
+
+void MainWindow::onRTBStarted(const QString& reason) {
+    appendAuditLog("[RTB] Return to Base initiated - " + reason, "#3B82F6");
+    if (lblMissionStatus) {
+        lblMissionStatus->setText("STATUS: RETURN TO BASE");
+        lblMissionStatus->setStyleSheet("QLabel { color: #3B82F6; font-weight: bold; }");
+    }
+}
+
+void MainWindow::onLandingDetected() {
+    appendAuditLog("[LANDING] Vehicle landing detected", "#10B981");
+    if (lblMissionStatus) {
+        lblMissionStatus->setText("STATUS: LANDING");
+        lblMissionStatus->setStyleSheet("QLabel { color: #10B981; font-weight: bold; }");
+    }
+}
+
+void MainWindow::onMissionCompleted() {
+    appendAuditLog("[MISSION] Mission lifecycle complete - Vehicle safe", "#10B981");
+    if (lblMissionStatus) {
+        lblMissionStatus->setText("STATUS: MISSION COMPLETE");
+        lblMissionStatus->setStyleSheet("QLabel { color: #10B981; font-weight: bold; }");
+    }
+    // Disable all command buttons
+    if (btnArm) btnArm->setEnabled(false);
+    if (btnTakeoff) btnTakeoff->setEnabled(false);
+    if (btnEngageHold) btnEngageHold->setEnabled(false);
 }

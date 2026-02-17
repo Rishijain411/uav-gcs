@@ -12,6 +12,7 @@ using namespace std;
 // 🔹 Forward declaration (NO include here)
 struct TelemetryData;
 class CommandManager;
+class GCSBackendInterface;
 
 #include "authority/MissionTransitionAuthority.h"
 #include "mission/search/SearchPattern.h"
@@ -38,11 +39,17 @@ public:
     void setCommandManager(CommandManager* cmd_manager) {
         cmd_manager_ = cmd_manager;
     }
+    
+    // Phase 4: Set UI interface for signal emission
+    void setUIInterface(GCSBackendInterface* ui_interface) {
+        ui_interface_ = ui_interface;
+    }
 
 private:
     unique_ptr<SearchPattern> search_pattern_;
     EngagementPolicy engagement_policy_;
     CommandManager* cmd_manager_ = nullptr;
+    GCSBackendInterface* ui_interface_ = nullptr;  // New: UI signal interface
     ProportionalNavigation pro_nav_;
     // Phase 4.1 — BDA tracking
     std::chrono::steady_clock::time_point assess_start_time_;
@@ -52,6 +59,10 @@ private:
     bool takeoff_requested_ = false;
     bool takeoff_completed_ = false;
     bool auto_mode_sent_ = false;
+    
+    // Arm stability tracking: wait for consistent health before transitioning to AUTO
+    int arm_stable_frames_ = 0;
+    static constexpr int ARM_STABLE_FRAMES_REQUIRED = 30;  // ~300ms at 100Hz - allow EKF/GPS to settle
     GeoPoint current_waypoint_;
     bool current_waypoint_active_ = false;
 

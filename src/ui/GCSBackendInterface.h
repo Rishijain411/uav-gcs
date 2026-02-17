@@ -29,6 +29,15 @@ public:
     void onMissionUploadComplete();
     void onCommandExecuted(const QString& command_name, bool success);
     void onError(const QString& error_message);
+    
+    // Recovery callbacks (New)
+    void onCommsLoss();
+    void onBDAStarted();
+    void onBDAComplete(const QString& health_status);
+    void onRTBInitiated(const QString& reason);
+    void onRecoveryPlanUpdated(const QString& plan);
+    void onLandingDetected();
+    void onMissionCompleted();
 
 signals:
     // Connection
@@ -56,6 +65,15 @@ signals:
     void commandQueued(const QString& cmd);
     void commandAcknowledged(const QString& cmd);
     void commandFailed(const QString& cmd, const QString& reason);
+    
+    // Recovery & RTB (New)
+    void commsLossDetected();
+    void bdaAssessmentStarted();
+    void bdaResult(const QString& health_status);  // MISSION_WORTHY, DEGRADED, CRITICAL
+    void rtbInitiated(const QString& reason);
+    void recoveryPlanUpdated(const QString& plan);
+    void landingDetected();
+    void missionCompleted();
     
     // General
     void statusUpdated(const QString& status);

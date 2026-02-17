@@ -74,8 +74,8 @@ void MavlinkCommandSender::sendCommand(
 // High-level helpers (NO CHANGE)
 // --------------------------------------------------
 void MavlinkCommandSender::sendArm() {
-    // param1=1 to arm, param2=21196 to force (bypass pre-arm checks)
-    sendCommand(MAV_CMD_COMPONENT_ARM_DISARM, 1.0f, 21196.0f);
+    // param1=1 to arm, param2=0 for normal preflight checks (real-world safety)
+    sendCommand(MAV_CMD_COMPONENT_ARM_DISARM, 1.0f, 0.0f);
 }
 
 void MavlinkCommandSender::sendDisarm() {

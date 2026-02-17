@@ -23,6 +23,7 @@
 #include <QScrollArea>
 #include <QTabWidget>
 #include <QSplitter>
+#include <limits>
 
 #include "mission/MissionProfile.h"
 #include "ui/IntegratedBackend.h"
@@ -74,6 +75,14 @@ public slots:
     void updateCurrentWaypoint(uint16_t seq);
     void displayError(const QString& error);
     void onMissionUploadSuccess();
+    
+    // Recovery & RTB slots (New)
+    void onCommsLoss();
+    void onBDAStarted();
+    void onBDAResult(const QString& health_status);
+    void onRTBStarted(const QString& reason);
+    void onLandingDetected();
+    void onMissionCompleted();
 
 private:
     enum class MissionUploadStatus {
@@ -188,6 +197,7 @@ private:
     bool missionProfileLoaded_ = false;
     bool preflightConfirmed_ = false;
     bool armConfirmed_ = false;
+    bool takeoffConfirmed_ = false;
 
     // Mission profile data
     mission::MissionProfile missionProfile_{};
@@ -197,6 +207,10 @@ private:
     MissionUploadStatus lastLoggedMissionUploadStatus_ = MissionUploadStatus::NOT_LOADED;
     int missionUploadTicks_ = 0;
     QString lastMissionState_;  // Track last mission state to avoid duplicate logs
+    uint16_t lastWaypointSeq_ = std::numeric_limits<uint16_t>::max();
+    QString lastErrorMessage_;
+    int lastUploadSent_ = -1;
+    int lastUploadTotal_ = -1;
 
     // Engage hold state
     QTimer* engageHoldTimer;

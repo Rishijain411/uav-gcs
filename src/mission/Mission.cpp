@@ -26,6 +26,12 @@ MissionState Mission::transition(MissionState state, MissionEvent event) {
             if (event == MissionEvent::LOAD_MISSION)
                 return MissionState::PREFLIGHT;
             break;
+        
+        case MissionState::ABORTED:
+            // Allow mission reload from ABORTED state
+            if (event == MissionEvent::LOAD_MISSION)
+                return MissionState::PREFLIGHT;
+            break;
 
         case MissionState::PREFLIGHT:
             if (event == MissionEvent::PREFLIGHT_OK)
@@ -109,8 +115,11 @@ const MissionProfile& Mission::getProfile() const {
 }
 
 bool Mission::apply_event(MissionEvent event) {
-    if (current_state_ == MissionState::ABORTED)
-    return false;
+    // Allow ABORTED → INIT transition for mission reload
+    if (current_state_ == MissionState::ABORTED && 
+        event != MissionEvent::LOAD_MISSION) {
+        return false;
+    }
 
     auto next = transition(current_state_, event);
 

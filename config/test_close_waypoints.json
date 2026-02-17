@@ -1,0 +1,44 @@
+{
+  "target_id": "TEST_TARGET_01",
+
+  "security": {
+    "mode": "PLAINTEXT"
+  },
+
+  "crypto": {
+    "key_id": "TEST_KEY",
+    "key_epoch": 1,
+    "mission_key_hex": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+  },
+
+  "search_area": {
+    "vertices": [
+      [47.397742, 8.545594, 50.0],
+      [47.398000, 8.545594, 50.0],
+      [47.398000, 8.546000, 50.0],
+      [47.397742, 8.546000, 50.0]
+    ],
+    "min_altitude_m": 30.0,
+    "max_altitude_m": 100.0
+  },
+
+  "waypoints": [
+    [47.397842, 8.545694, 50.0],
+    [47.397900, 8.545750, 60.0],
+    [47.397950, 8.545800, 70.0],
+    [47.397900, 8.545850, 60.0],
+    [47.397842, 8.545894, 50.0]
+  ],
+
+  "payload_policy": {
+    "type": "KINETIC",
+    "arm_on_engagement": true,
+    "arming_delay_seconds": 2.0
+  },
+
+  "failsafe_rules": {
+    "comms_loss": "RTL",
+    "low_battery": "RTL",
+    "gps_jamming": "LAND"
+  }
+}

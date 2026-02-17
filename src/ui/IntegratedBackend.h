@@ -23,6 +23,8 @@ public:
     void sendTakeoffCommand();
     void sendAbortCommand();
     void sendEngageCommand();
+    void sendRtlCommand();
+    void sendLandCommand();
     
 private:
     void runBackendLoop();
@@ -36,5 +38,7 @@ private:
     std::atomic<bool> takeoff_requested_;
     std::atomic<bool> abort_requested_;
     std::atomic<bool> engage_requested_;
+    std::atomic<bool> rtl_requested_;
+    std::atomic<bool> land_requested_;
     std::string mission_file_;
 };

@@ -1,6 +1,7 @@
 #include "MissionController.h"
 #include "command/CommandManager.h"
 #include "telemetry/TelemetryData.h"
+#include "ui/GCSBackendInterface.h"
 
 #include <chrono>
 #include <string>
@@ -36,8 +37,15 @@ void MissionController::update(
     auto hb_elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         now - telemetry.last_heartbeat_time).count();
 
-    // If link is lost for > 2 seconds, trigger failsafe transition
-    if (hb_elapsed_ms > 2000 && mission.state() != mission::MissionState::INIT) {
+    // If link is lost for > 10 seconds, trigger failsafe transition
+    // Ignore during INIT, PREFLIGHT, and ABORTED states (connection not required yet)
+    if (hb_elapsed_ms > 10000 && 
+        mission.state() != mission::MissionState::INIT &&
+        mission.state() != mission::MissionState::PREFLIGHT &&
+        mission.state() != mission::MissionState::ABORTED) {
+        if (ui_interface_) {
+            ui_interface_->onCommsLoss();
+        }
         MissionTransitionAuthority::requestTransition(
             mission,
             mission::MissionEvent::SYSTEM_FAILURE,
@@ -64,8 +72,9 @@ void MissionController::update(
     // ==================================================
     // ARM CONFIRMATION (PX4 authoritative)
     // ==================================================
-    static int armed_stable_frames = 0;
-
+    // Wait for consistent health before confirming ARM
+    // This prevents transitioning to AUTO while preflight checks are still settling
+    
     if (mission.state() == mission::MissionState::ARM_REQUESTED) {
 
         if (telemetry.arm_state == ArmState::ARMED &&
@@ -73,16 +82,17 @@ void MissionController::update(
             telemetry.battery_ok &&
             !telemetry.in_failsafe)
         {
-            armed_stable_frames++;
+            arm_stable_frames_++;
         } else {
-            armed_stable_frames = 0;
+            arm_stable_frames_ = 0;
         }
 
-        if (armed_stable_frames >= 5) {
+        // Wait for ARM_STABLE_FRAMES_REQUIRED (~100ms) to ensure stable arming
+        if (arm_stable_frames_ >= ARM_STABLE_FRAMES_REQUIRED) {
             MissionTransitionAuthority::requestTransition(
                 mission,
                 mission::MissionEvent::VEHICLE_ARMED);
-            armed_stable_frames = 0;
+            arm_stable_frames_ = 0;
         }
     }
 
@@ -141,9 +151,29 @@ void MissionController::update(
             mission,
             mission::MissionEvent::OPERATOR_AUTO_CONFIRM);
 
-        auto_mode_sent_ = false; // prevent repeat
+        auto_mode_sent_ = false;
         return;
     }
+
+    // ==================================================
+    // TESTING: External TAKEOFF detection (for `commander takeoff` in PX4)
+    // ==================================================
+    static NavState last_nav_state = NavState::UNKNOWN;
+    
+    if (mission.state() == mission::MissionState::ARMED &&
+        !auto_mode_sent_ &&
+        (telemetry.nav_state == NavState::AUTO_MISSION || 
+         telemetry.nav_state == NavState::AUTO_TAKEOFF) &&
+        last_nav_state != NavState::AUTO_MISSION &&
+        last_nav_state != NavState::AUTO_TAKEOFF)
+    {
+        std::cout << "[TEST MODE] External TAKEOFF detected - transitioning to TRANSIT\n";
+        MissionTransitionAuthority::requestTransition(
+            mission,
+            mission::MissionEvent::OPERATOR_AUTO_CONFIRM);
+    }
+    
+    last_nav_state = telemetry.nav_state;
 
     // ==================================================
     // ABORT HANDLING
@@ -189,7 +219,13 @@ void MissionController::update(
 
     case mission::MissionState::RTB:
         // Monitor return journey and finalize on landing
+        if (mission.isStateNewlyEntered() && ui_interface_) {
+            ui_interface_->onRTBInitiated("Battle Damage Assessment Complete");
+        }
         if (telemetry.isLanded()) {
+            if (ui_interface_) {
+                ui_interface_->onLandingDetected();
+            }
             MissionTransitionAuthority::requestTransition(
                 mission,
                 mission::MissionEvent::MISSION_COMPLETE);
@@ -198,6 +234,9 @@ void MissionController::update(
 
     case mission::MissionState::COMPLETE:
     case mission::MissionState::ABORTED:
+        if (mission.state() == mission::MissionState::COMPLETE && ui_interface_) {
+            ui_interface_->onMissionCompleted();
+        }
         handleRecovery(mission, telemetry);
         break;
 
@@ -506,6 +545,10 @@ void MissionController::handleAssess(
         stable_frames_ = 0;
         bda_completed_ = false;
 
+        if (ui_interface_) {
+            ui_interface_->onBDAStarted();
+        }
+
         AuditLogger::logDecision(
             VehicleCommand::NONE,
             mission.state(),
@@ -543,6 +586,18 @@ void MissionController::handleAssess(
         mission.state(),
         result,
         "Post-engagement health evaluation complete");
+
+    // Emit BDA result to UI
+    if (ui_interface_) {
+        std::string health_status;
+        switch(result) {
+            case mission::BDAResult::MISSION_WORTHY: health_status = "MISSION_WORTHY"; break;
+            case mission::BDAResult::DEGRADED: health_status = "DEGRADED"; break;
+            case mission::BDAResult::CRITICAL: health_status = "CRITICAL"; break;
+            default: health_status = "UNKNOWN"; break;
+        }
+        ui_interface_->onBDAComplete(QString::fromStdString(health_status));
+    }
 
     //  — Recovery Planning
     auto recovery_plan = buildRecoveryPlan(

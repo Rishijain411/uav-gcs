@@ -67,6 +67,14 @@ void IntegratedBackend::sendEngageCommand() {
     engage_requested_ = true;
 }
 
+void IntegratedBackend::sendRtlCommand() {
+    rtl_requested_ = true;
+}
+
+void IntegratedBackend::sendLandCommand() {
+    land_requested_ = true;
+}
+
 void IntegratedBackend::runBackendLoop() {
     TelemetryData telemetry;
     StateManager stateManager;
@@ -102,9 +110,9 @@ void IntegratedBackend::runBackendLoop() {
     uint16_t last_request_seq_processed = 0xFFFF;  // Track which seq we last processed
     auto mission_upload_start = std::chrono::steady_clock::now();
     auto next_mission_retry_at = std::chrono::steady_clock::now();
-    const int MISSION_UPLOAD_MAX_RETRIES = 5;
-    const int MISSION_UPLOAD_BASE_BACKOFF_MS = 100;
-    const int MISSION_UPLOAD_TIMEOUT_MS = 5000;
+    const int MISSION_UPLOAD_MAX_RETRIES = 10;
+    const int MISSION_UPLOAD_BASE_BACKOFF_MS = 500;
+    const int MISSION_UPLOAD_TIMEOUT_MS = 20000;
     
     auto last_hb = std::chrono::steady_clock::now();
     
@@ -138,8 +146,8 @@ void IntegratedBackend::runBackendLoop() {
             std::cout << "[BACKEND] Clearing any existing mission on vehicle...\n";
             cmdSender->sendMissionClearAll();
             
-            // If mission was already loaded, start upload now
-            if (mission_loaded && !mission_upload_started) {
+            // If mission was already loaded, start upload now (only if not already complete)
+            if (mission_loaded && !mission_upload_started && !mission_upload_complete) {
                 std::cout << "[BACKEND] Starting mission upload after connection...\n";
                 mission_upload_started = true;
                 mission_upload_complete = false;
@@ -147,7 +155,8 @@ void IntegratedBackend::runBackendLoop() {
                 mission_waypoints_sent = 0;
                 mission_upload_retries = 0;
                 mission_upload_start = now;
-                next_mission_retry_at = now;
+                next_mission_retry_at = now + std::chrono::milliseconds(2000); // Give PX4 time to respond
+                telemetry.mission_request_received = false; // Clear before starting
                 
                 cmdSender->sendMissionCount(static_cast<uint16_t>(profile.waypoints.size()));
                 emit ui_interface_->missionUploadProgress(0, profile.waypoints.size());
@@ -171,6 +180,13 @@ void IntegratedBackend::runBackendLoop() {
                     
                     std::cout << "[BACKEND] Mission loaded into memory\n";
                     
+                    // Trigger state transition from INIT → PREFLIGHT
+                    MissionTransitionAuthority::requestTransition(
+                        mission,
+                        mission::MissionEvent::LOAD_MISSION);
+                    
+                    std::cout << "[BACKEND] Mission state transitioned to PREFLIGHT\n";
+                    
                     // Start mission upload if connected
                     if (sender_initialized && cmdSender) {
                         mission_upload_started = true;
@@ -179,7 +195,13 @@ void IntegratedBackend::runBackendLoop() {
                         mission_waypoints_sent = 0;
                         mission_upload_retries = 0;
                         mission_upload_start = now;
-                        next_mission_retry_at = now;
+                        next_mission_retry_at = now + std::chrono::milliseconds(2000); // Give PX4 time to respond
+                        
+                        // Set telemetry flags for UI
+                        telemetry.mission_upload_in_progress = true;
+                        telemetry.mission_upload_complete = false;
+                        telemetry.mission_upload_failed = false;
+                        telemetry.mission_request_received = false; // Clear before starting
                         
                         std::cout << "[BACKEND] Starting mission upload...\n";
                         
@@ -229,6 +251,9 @@ void IntegratedBackend::runBackendLoop() {
                 last_request_seq_processed = seq;
                 telemetry.mission_request_received = false;
                 
+                // Reset retry timer since PX4 is responding
+                next_mission_retry_at = now + std::chrono::milliseconds(2000);
+                
                 if (seq < profile.waypoints.size()) {
                     std::cout << "[BACKEND] Sending waypoint " << seq << ": lat=" 
                               << profile.waypoints[seq].lat << " lon=" << profile.waypoints[seq].lon 
@@ -261,7 +286,6 @@ void IntegratedBackend::runBackendLoop() {
                     telemetry.mission_upload_complete = true;
                     telemetry.mission_upload_in_progress = false;
                     std::cout << "[BACKEND] Mission upload successful!\n";
-                    emit ui_interface_->missionStateChanged("UPLOAD_COMPLETE");
                     emit ui_interface_->missionUploadSuccess();  // Enable preflight in UI
                 } else {
                     mission_upload_failed = true;
@@ -306,6 +330,18 @@ void IntegratedBackend::runBackendLoop() {
             engage_requested_ = false;
         }
         
+        if (rtl_requested_ && sender_initialized && cmdSender) {
+            std::cout << "[BACKEND] Sending RTL (Return to Launch) command\n";
+            cmdSender->sendSetModeRTL();
+            rtl_requested_ = false;
+        }
+        
+        if (land_requested_ && sender_initialized && cmdSender) {
+            std::cout << "[BACKEND] Sending LAND command\n";
+            cmdSender->sendLand();
+            land_requested_ = false;
+        }
+        
         // Update mission controller
         commandManager.update(telemetry, stateManager.getMutableState());
         missionController.update(mission, telemetry);
@@ -333,11 +369,8 @@ void IntegratedBackend::runBackendLoop() {
             }
             emit ui_interface_->modeChanged(mode);
             
-            // Emit mission state
-            QString missionState = "IDLE";
-            if (telemetry.mission_current_seq > 0) {
-                missionState = QString("WPT %1").arg(telemetry.mission_current_seq);
-            }
+            // Emit mission state from MissionController
+            QString missionState = QString::fromStdString(mission::to_string(mission.state()));
             emit ui_interface_->missionStateChanged(missionState);
         }
         
