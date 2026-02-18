@@ -97,6 +97,28 @@ void MissionController::update(
     }
 
     // ==================================================
+    // TESTING: External ARM detection (for `commander arm` in PX4)
+    // Bypasses preflight checks - vehicle must handle its own safety
+    // ==================================================
+    static ArmState last_arm_state = ArmState::DISARMED;
+    
+    if (mission.state() == mission::MissionState::PREFLIGHT &&
+        telemetry.arm_state == ArmState::ARMED &&
+        last_arm_state == ArmState::DISARMED &&
+        !OperatorAuthorization::hasPending())
+    {
+        std::cout << "[TEST MODE] External ARM detected (commander arm) - transitioning to ARMED\n";
+        
+        // Skip ARM_REQUESTED state and go directly to ARMED
+        // This allows testing with PX4 console without requiring GCS button confirmation
+        MissionTransitionAuthority::requestTransition(
+            mission,
+            mission::MissionEvent::VEHICLE_ARMED);
+    }
+    
+    last_arm_state = telemetry.arm_state;
+
+    // ==================================================
     // ARMED → OITL AUTO MODE 
     // ==================================================
     if (mission.state() == mission::MissionState::ARMED &&
