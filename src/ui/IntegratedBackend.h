@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <atomic>
+#include <mutex>
 
 class GCSBackendInterface;
 
@@ -40,5 +41,8 @@ private:
     std::atomic<bool> engage_requested_;
     std::atomic<bool> rtl_requested_;
     std::atomic<bool> land_requested_;
+    
+    // Thread-safe mission file access
+    std::mutex mission_file_mutex_;
     std::string mission_file_;
 };

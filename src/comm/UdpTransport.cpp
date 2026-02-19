@@ -4,6 +4,9 @@
 #include <cstring>
 #include <unistd.h>
 #include <iostream>
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <errno.h>
 
 UdpTransport::UdpTransport(
     SecureChannel* secure,
@@ -21,6 +24,22 @@ bool UdpTransport::start(int port)
         return false;
     }
 
+    // Set socket to non-blocking mode to prevent hanging
+    int flags = fcntl(sockfd, F_GETFL, 0);
+    if (flags < 0 || fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        perror("fcntl");
+        close(sockfd);
+        return false;
+    }
+
+    // Set receive timeout (500ms) to bail out if stuck
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 500000;  // 500ms
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        perror("setsockopt SO_RCVTIMEO");
+    }
+
     sockaddr_in local{};
     local.sin_family = AF_INET;
     local.sin_addr.s_addr = INADDR_ANY;
@@ -34,7 +53,7 @@ bool UdpTransport::start(int port)
         return false;
     }
 
-    std::cout << "[UDP] Listening on port " << port << std::endl;
+    std::cout << "[UDP] Listening on port " << port << " (non-blocking)\n";
     return true;
 }
 
@@ -63,13 +82,18 @@ int UdpTransport::send(
 int UdpTransport::receive(uint8_t* buffer, size_t max_len)
 {
     if (security_enabled_ && secure_) {
-        return secure_->receiveAndDecrypt(
+        int ret = secure_->receiveAndDecrypt(
             SecureChannel::Channel::MAVLINK,  // control/telemetry channel
             sockfd,
             buffer,
             max_len);
-
+        return ret;  // May return -1 on timeout or no data
     }
 
-    return recvfrom(sockfd, buffer, max_len, 0, nullptr, nullptr);
+    int ret = recvfrom(sockfd, buffer, max_len, 0, nullptr, nullptr);
+    // EAGAIN/EWOULDBLOCK/EINTR are normal for non-blocking/timeout sockets
+    if (ret < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+        // Real error - uncomment for debugging: perror("recvfrom");
+    }
+    return ret;
 }

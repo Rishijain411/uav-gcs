@@ -13,11 +13,17 @@
 #include "mission/Mission.h"
 #include "mission/MissionController.h"
 #include "mission/MissionProfileParser.h"
+#include "authority/MissionTransitionAuthority.h"
+
+extern "C" {
+#include "mavlink/common/mavlink.h"
+}
 
 #include <chrono>
 #include <thread>
 #include <iostream>
 #include <QString>
+#include <string>
 
 IntegratedBackend::IntegratedBackend(GCSBackendInterface* ui_interface)
     : ui_interface_(ui_interface), running_(false), mission_load_requested_(false),
@@ -43,7 +49,10 @@ void IntegratedBackend::stop() {
 }
 
 void IntegratedBackend::loadMission(const std::string& mission_file) {
-    mission_file_ = mission_file;
+    {
+        std::lock_guard<std::mutex> lock(mission_file_mutex_);
+        mission_file_ = mission_file;
+    }
     mission_load_requested_ = true;
 }
 
@@ -93,6 +102,7 @@ void IntegratedBackend::runBackendLoop() {
     GcsHeartbeat gcsHeartbeat(linkManager);
     MissionController missionController;
     missionController.setCommandManager(&commandManager);
+    missionController.setUIInterface(ui_interface_);  // Set UI interface to disable terminal OITL
     
     std::cout << "[BACKEND] Started, listening on UDP ports 14550 and 15550\n";
     
@@ -110,11 +120,18 @@ void IntegratedBackend::runBackendLoop() {
     uint16_t last_request_seq_processed = 0xFFFF;  // Track which seq we last processed
     auto mission_upload_start = std::chrono::steady_clock::now();
     auto next_mission_retry_at = std::chrono::steady_clock::now();
+    
+    // Mission load timeout tracking
+    auto mission_load_start = std::chrono::steady_clock::now();
+    bool mission_load_in_progress = false;
     const int MISSION_UPLOAD_MAX_RETRIES = 10;
     const int MISSION_UPLOAD_BASE_BACKOFF_MS = 500;
     const int MISSION_UPLOAD_TIMEOUT_MS = 20000;
+    const int MISSION_LOAD_TIMEOUT_MS = 10000;  // 10 second timeout for loading
     
     auto last_hb = std::chrono::steady_clock::now();
+    std::string last_status_text_emitted;
+    auto last_status_text_time = std::chrono::steady_clock::time_point::min();
     
     while (running_) {
         auto now = std::chrono::steady_clock::now();
@@ -167,16 +184,25 @@ void IntegratedBackend::runBackendLoop() {
         }
         
         // Load mission when requested
-        if (mission_load_requested_ && !mission_loaded && !mission_file_.empty()) {
-            std::string error;
-            std::cout << "[BACKEND] Loading mission from: " << mission_file_ << "\n";
+        if (mission_load_requested_ && !mission_loaded && !mission_load_in_progress) {
+            mission_load_in_progress = true;
+            mission_load_start = now;
+            std::string mission_file_copy;
+            {
+                std::lock_guard<std::mutex> lock(mission_file_mutex_);
+                mission_file_copy = mission_file_;
+            }
             
-            if (mission::MissionProfileParser::parseFromJson(mission_file_, profile, error)) {
+            std::string error;
+            std::cout << "[BACKEND] Loading mission from: " << mission_file_copy << "\n";
+            
+            if (mission::MissionProfileParser::parseFromJson(mission_file_copy, profile, error)) {
                 std::cout << "[BACKEND] Mission parsed: " << profile.waypoints.size() << " waypoints\n";
                 
                 if (mission.loadProfile(profile)) {
                     mission_loaded = true;
                     mission_load_requested_ = false;
+                    mission_load_in_progress = false;
                     
                     std::cout << "[BACKEND] Mission loaded into memory\n";
                     
@@ -214,9 +240,22 @@ void IntegratedBackend::runBackendLoop() {
                     }
                 } else {
                     std::cout << "[BACKEND] Failed to load mission profile into Mission object\n";
+                    mission_load_in_progress = false;
                 }
             } else {
                 std::cout << "[BACKEND] Failed to parse mission JSON: " << error << "\n";
+                mission_load_in_progress = false;
+            }
+        }
+        
+        // Mission load timeout check
+        if (mission_load_in_progress) {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - mission_load_start).count();
+            if (elapsed > MISSION_LOAD_TIMEOUT_MS) {
+                std::cout << "[BACKEND] ERROR: Mission load timeout after " << elapsed << "ms\n";
+                mission_load_in_progress = false;
+                mission_load_requested_ = false;
+                emit ui_interface_->errorOccurred("Mission load timeout");
             }
         }
         
@@ -286,6 +325,13 @@ void IntegratedBackend::runBackendLoop() {
                     telemetry.mission_upload_complete = true;
                     telemetry.mission_upload_in_progress = false;
                     std::cout << "[BACKEND] Mission upload successful!\n";
+                    
+                    // Start the mission by setting current waypoint to 0
+                    if (sender_initialized && cmdSender) {
+                        std::cout << "[BACKEND] Starting mission (setting current waypoint to 0)\n";
+                        cmdSender->sendMissionSetCurrent(0);
+                    }
+                    
                     emit ui_interface_->missionUploadSuccess();  // Enable preflight in UI
                 } else {
                     mission_upload_failed = true;
@@ -299,9 +345,27 @@ void IntegratedBackend::runBackendLoop() {
         
         // Handle ARM/DISARM/ABORT commands
         if (arm_requested_ && sender_initialized && cmdSender) {
-            std::cout << "[BACKEND] Sending ARM command\n";
-            cmdSender->sendArm();
+            if (mission.state() == mission::MissionState::PREFLIGHT) {
+                std::cout << "[BACKEND] UI ARM button: Applying PREFLIGHT_OK (operator authorized via UI)\n";
+                // Direct application - operator already authorized by clicking UI button
+                mission.apply_event(mission::MissionEvent::PREFLIGHT_OK);
+            } else {
+                std::cout << "[BACKEND] ARM requested but not in PREFLIGHT state (current: "
+                          << static_cast<int>(mission.state()) << ")\n";
+            }
             arm_requested_ = false;
+        }
+        
+        // Check for ARM command ACK and notify UI immediately
+        // This ensures UI updates armConfirmed_ as soon as ARM succeeds, not waiting for heartbeat
+        // BUT: Don't consume the ACK here - let CommandManager handle it first
+        if (telemetry.last_command_ack.valid) {
+            if (telemetry.last_command_ack.command_id == MAV_CMD_COMPONENT_ARM_DISARM &&
+                telemetry.last_command_ack.result == MAV_RESULT_ACCEPTED) {
+                // ARM command accepted - notify UI immediately (don't wait for heartbeat)
+                emit ui_interface_->armStateChanged(true);
+                // Don't consume ACK here - CommandManager needs it to clear active command
+            }
         }
         
         if (disarm_requested_ && sender_initialized && cmdSender) {
@@ -317,8 +381,8 @@ void IntegratedBackend::runBackendLoop() {
         }
         
         if (takeoff_requested_ && sender_initialized && cmdSender) {
-            std::cout << "[BACKEND] Sending TAKEOFF command\n";
-            cmdSender->sendTakeoff(20.0);  // Takeoff to 20m altitude
+            std::cout << "[BACKEND] Sending TAKEOFF (AUTO mode)\n";
+            cmdSender->sendSetModeAuto();
             takeoff_requested_ = false;
         }
         
@@ -354,9 +418,14 @@ void IntegratedBackend::runBackendLoop() {
                 telemetry.relative_alt_m
             );
             
-            emit ui_interface_->armStateChanged(
-                telemetry.arm_state == ArmState::ARMED
-            );
+            // Emit arm state change (only when state actually changes)
+            static ArmState last_arm_state = ArmState::DISARMED;
+            if (telemetry.arm_state != last_arm_state) {
+                last_arm_state = telemetry.arm_state;
+                emit ui_interface_->armStateChanged(
+                    telemetry.arm_state == ArmState::ARMED
+                );
+            }
             
             // Emit flight mode
             QString mode = "UNKNOWN";
@@ -372,6 +441,29 @@ void IntegratedBackend::runBackendLoop() {
             // Emit mission state from MissionController
             QString missionState = QString::fromStdString(mission::to_string(mission.state()));
             emit ui_interface_->missionStateChanged(missionState);
+
+            if (telemetry.status_text_updated) {
+                telemetry.status_text_updated = false;
+                const std::string current_text = telemetry.last_status_text;
+                const bool recently_emitted =
+                    (current_text == last_status_text_emitted) &&
+                    (std::chrono::duration_cast<std::chrono::milliseconds>(
+                         now - last_status_text_time).count() < 2000);
+
+                if (!current_text.empty() && !recently_emitted) {
+                    emit ui_interface_->statusUpdated(
+                        QString::fromUtf8(current_text.c_str()));
+                    last_status_text_emitted = current_text;
+                    last_status_text_time = now;
+                }
+            }
+            
+            // Emit health status for BIT checkboxes
+            emit ui_interface_->healthStatusUpdated(
+                telemetry.ekf_ok,
+                telemetry.battery_ok,
+                telemetry.heartbeat_received
+            );
         }
         
         std::this_thread::sleep_for(std::chrono::milliseconds(10));

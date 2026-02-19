@@ -3,14 +3,18 @@
 #include <optional>
 #include <chrono>
 #include <iostream>
+#include <string>
+#include <vector>
+using namespace std;
 
 #include "VehicleCommand.h"
 #include "core/SystemState.h"
 #include "telemetry/TelemetryData.h"
 #include "mission/MissionState.h"
 #include "mission/search/SearchPattern.h"
-#include "mission/engagement/ProportionalNavigation.h"
+
 class MavlinkCommandSender;
+struct Vector3D;
 
 class CommandManager {
 public:
@@ -33,16 +37,21 @@ public:
 
     bool hasActiveCommand() const;
 
-    // NEW: timeout status (for MissionController)
     bool hasCommandTimedOut() const { return command_timed_out_; }
+    void clearCommandTimeout() { command_timed_out_ = false; }
+
+    // ARM ACK tracking for state machine
+    bool hasArmAckBeenReceived() const { return arm_ack_received_; }
+    void clearArmAckFlag() { arm_ack_received_ = false; }
 
     // Phase C: Search waypoint publishing
     void sendSearchWaypoint(const GeoPoint& waypoint);
 
+    void sendAccelerationCommand(const Vector3D& accel);
+
     void setCommandSender(MavlinkCommandSender* sender) {
         sender_ = sender;
     }
-    void sendAccelerationCommand(const Vector3D& accel);
 
 private:
     struct TrackedCommand {
@@ -50,7 +59,7 @@ private:
         uint16_t mavlink_cmd_id;
         int retry_count = 0;
         int max_retries = 3;
-        std::chrono::steady_clock::time_point last_sent_time;
+        chrono::steady_clock::time_point last_sent_time;
     };
 
     uint16_t mapToMavlinkCommand(VehicleCommand cmd) const;
@@ -61,9 +70,8 @@ private:
 
     void handleRetry();
 
-    std::optional<TrackedCommand> active_command_;
+    optional<TrackedCommand> active_command_;
     MavlinkCommandSender* sender_ = nullptr;
-
-    
     bool command_timed_out_ = false;
+    bool arm_ack_received_ = false;  // Track ARM ACK for state machine
 };

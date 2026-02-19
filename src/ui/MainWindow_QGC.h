@@ -75,6 +75,7 @@ public slots:
     void updateCurrentWaypoint(uint16_t seq);
     void displayError(const QString& error);
     void onMissionUploadSuccess();
+    void onStatusUpdated(const QString& status);
     
     // Recovery & RTB slots (New)
     void onCommsLoss();
@@ -83,6 +84,7 @@ public slots:
     void onRTBStarted(const QString& reason);
     void onLandingDetected();
     void onMissionCompleted();
+    void onHealthStatusUpdated(bool ekf_ok, bool battery_ok, bool heartbeat_ok);
 
 private:
     enum class MissionUploadStatus {
@@ -191,6 +193,9 @@ private:
     QProgressBar* abortHoldProgress;
     QProgressBar* takeoffHoldProgress;
     QTextEdit* txtAuditLog;
+
+    QString armButtonBaseStyle_;
+    QString lastStatusText_;
 
 
     // UI gate state

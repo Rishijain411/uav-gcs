@@ -237,6 +237,7 @@ void TelemetryParser::parse(uint8_t byte) {
 
     telemetry.last_status_text[
         sizeof(telemetry.last_status_text) - 1] = '\0';
+    telemetry.status_text_updated = true;
 
     // ---------------- PREFLIGHT OK DETECTION ----------------
     if (strstr(st.text, "Ready for takeoff") ||

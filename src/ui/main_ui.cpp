@@ -40,6 +40,10 @@ int main(int argc, char *argv[]) {
                     &window, &MainWindow::displayError);
     QObject::connect(backend_interface, &GCSBackendInterface::missionUploadSuccess,
                     &window, &MainWindow::onMissionUploadSuccess);
+    QObject::connect(backend_interface, &GCSBackendInterface::statusUpdated,
+                    &window, &MainWindow::onStatusUpdated);
+    QObject::connect(backend_interface, &GCSBackendInterface::healthStatusUpdated,
+                    &window, &MainWindow::onHealthStatusUpdated);
     
     // Recovery & RTB connections (New)
     QObject::connect(backend_interface, &GCSBackendInterface::commsLossDetected,

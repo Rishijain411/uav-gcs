@@ -66,6 +66,9 @@ signals:
     void commandAcknowledged(const QString& cmd);
     void commandFailed(const QString& cmd, const QString& reason);
     
+    // Health checks (BIT)
+    void healthStatusUpdated(bool ekf_ok, bool battery_ok, bool heartbeat_ok);
+    
     // Recovery & RTB (New)
     void commsLossDetected();
     void bdaAssessmentStarted();

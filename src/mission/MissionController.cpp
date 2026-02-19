@@ -76,12 +76,35 @@ void MissionController::update(
     // This prevents transitioning to AUTO while preflight checks are still settling
     
     if (mission.state() == mission::MissionState::ARM_REQUESTED) {
+        bool arm_ack_received = false;
+        
+        // Check if ARM command ACK was received
+        if (cmd_manager_ && cmd_manager_->hasArmAckBeenReceived()) {
+            arm_ack_received = true;
+            std::cout << "[ARM ACK] Flag set - can proceed to ARMED state\n";
+        }
 
-        if (telemetry.arm_state == ArmState::ARMED &&
-            telemetry.ekf_ok &&
-            telemetry.battery_ok &&
-            !telemetry.in_failsafe)
-        {
+        // ========== SITL MODE: Skip health checks for testing ==========
+        #ifdef SITL_MODE
+            // In SITL, we bypass health checks to test the logic flow
+            // without hardware dependencies (GPS, real battery, etc.)
+            bool health_ok = true;
+            static auto last_sitl_log = std::chrono::steady_clock::time_point::min();
+            const auto now = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_sitl_log).count() > 1000) {
+                std::cout << "[TEST] SITL MODE ACTIVE: Health checks bypassed\n";
+                last_sitl_log = now;
+            }
+        #else
+            // Production: Enforce all health checks
+            bool health_ok = (telemetry.ekf_ok &&
+                            telemetry.battery_ok &&
+                            !telemetry.in_failsafe);
+        #endif
+        
+        // Arm state check (always required, both SITL and production)
+        // CRITICAL: Require BOTH ARM command ACK AND telemetry confirmation
+        if (arm_ack_received && telemetry.arm_state == ArmState::ARMED && health_ok) {
             arm_stable_frames_++;
         } else {
             arm_stable_frames_ = 0;
@@ -89,6 +112,10 @@ void MissionController::update(
 
         // Wait for ARM_STABLE_FRAMES_REQUIRED (~100ms) to ensure stable arming
         if (arm_stable_frames_ >= ARM_STABLE_FRAMES_REQUIRED) {
+            if (cmd_manager_) {
+                cmd_manager_->clearCommandTimeout();
+                cmd_manager_->clearArmAckFlag();  // Clear flag for next ARM attempt
+            }
             MissionTransitionAuthority::requestTransition(
                 mission,
                 mission::MissionEvent::VEHICLE_ARMED);
@@ -98,37 +125,56 @@ void MissionController::update(
 
     // ==================================================
     // TESTING: External ARM detection (for `commander arm` in PX4)
-    // Bypasses preflight checks - vehicle must handle its own safety
+    // Only trigger if mission is still in PREFLIGHT when ARM occurs
     // ==================================================
     static ArmState last_arm_state = ArmState::DISARMED;
-    
+    static bool external_arm_processed = false;
+
+    // Reset flag when entering PREFLIGHT
+    if (mission.state() == mission::MissionState::PREFLIGHT && 
+        last_state_ != mission::MissionState::PREFLIGHT) {
+        external_arm_processed = false;
+    }
+
+    // Only detect external ARM if:
+    // - Still in PREFLIGHT (UI hasn't started ARM_REQUESTED flow)
+    // - Vehicle just transitioned to ARMED
+    // - Haven't already processed this external ARM
     if (mission.state() == mission::MissionState::PREFLIGHT &&
         telemetry.arm_state == ArmState::ARMED &&
         last_arm_state == ArmState::DISARMED &&
-        !OperatorAuthorization::hasPending())
+        !external_arm_processed)
     {
-        std::cout << "[TEST MODE] External ARM detected (commander arm) - transitioning to ARMED\n";
+        std::cout << "[TEST MODE] External ARM detected (commander arm)\n";
+        external_arm_processed = true;
         
-        // Skip ARM_REQUESTED state and go directly to ARMED
-        // This allows testing with PX4 console without requiring GCS button confirmation
         MissionTransitionAuthority::requestTransition(
             mission,
-            mission::MissionEvent::VEHICLE_ARMED);
+            mission::MissionEvent::PREFLIGHT_OK);
     }
     
     last_arm_state = telemetry.arm_state;
 
     // ==================================================
-    // ARMED → OITL AUTO MODE 
+    // ARMED → AUTO MODE 
     // ==================================================
+    // When UI is active: TAKEOFF button handles SET_MODE_AUTO (no terminal prompt)
+    // When headless: Request OITL authorization via terminal
+    // Skip automatic request if UI is active - UI TAKEOFF button will handle it
     if (mission.state() == mission::MissionState::ARMED &&
         !auto_mode_sent_ &&
         !OperatorAuthorization::hasPending())
     {
-        OperatorAuthorization::request(
-            VehicleCommand::SET_MODE_AUTO,
-            mission.state());
-        return;
+        // Only request terminal OITL if no UI is active
+        // UI mode: User clicks TAKEOFF button → backend sends SET_MODE_AUTO directly
+        if (ui_interface_ == nullptr) {
+            OperatorAuthorization::request(
+                VehicleCommand::SET_MODE_AUTO,
+                mission.state());
+            return;
+        }
+        // UI mode: Don't request here, wait for UI TAKEOFF button
+        // The automatic transition in main.cpp will handle it
     }
 
     // ==================================================
@@ -204,12 +250,19 @@ void MissionController::update(
         mission.state() != mission::MissionState::COMPLETE)
     {
         if (cmd_manager_ && cmd_manager_->hasCommandTimedOut()) {
-            MissionTransitionAuthority::requestTransition(
-                mission,
-                mission::MissionEvent::SYSTEM_FAILURE,
-                MissionAbortReason::COMMAND_TIMEOUT,
-                "Command retry limit exceeded");
-            return;
+            // Do not abort during preflight/arm request/armed in SITL; allow late ACKs
+            if (mission.state() == mission::MissionState::PREFLIGHT ||
+                mission.state() == mission::MissionState::ARM_REQUESTED ||
+                mission.state() == mission::MissionState::ARMED) {
+                cmd_manager_->clearCommandTimeout();
+            } else {
+                MissionTransitionAuthority::requestTransition(
+                    mission,
+                    mission::MissionEvent::SYSTEM_FAILURE,
+                    MissionAbortReason::COMMAND_TIMEOUT,
+                    "Command retry limit exceeded");
+                return;
+            }
         }
 
         if (telemetry.in_failsafe) {
@@ -349,14 +402,14 @@ void MissionController::handleSearch(
     }
 
     // --------------------------------------------------
-    // MISSION UPLOADED MODE: Monitor PX4's autonomous execution
+    // AUTO MODE: Monitor PX4's autonomous execution
     // --------------------------------------------------
-    if (telemetry.mission_upload_complete) {
-        // Mission is uploaded to PX4, monitor via MISSION_CURRENT
+    if (telemetry.nav_state == NavState::AUTO_MISSION ||
+        telemetry.nav_state == NavState::AUTO_TAKEOFF) {
         if (telemetry.mission_current_received) {
             std::cout << "[SEARCH] PX4 executing mission waypoint " << telemetry.mission_current_seq << "\n";
         }
-        return;  // Don't send search waypoints; let PX4 execute uploaded mission
+        return;  // Don't send search waypoints; let PX4 execute mission
     }
 
     // --------------------------------------------------

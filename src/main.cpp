@@ -489,8 +489,24 @@ int main(int argc, char* argv[]) {
                 mission.markStateHandled();
             }
             
-            // Operator can trigger transition to TRANSIT
-            // This is typically done via MissionController or operator input
+            // After ARM succeeds, automatically transition to TRANSIT
+            // This will trigger SET_MODE_AUTO command in TRANSIT state
+            static bool transit_requested = false;
+            if (mission.isStateNewlyEntered()) {
+                transit_requested = false;  // Reset flag when entering ARMED
+            }
+            
+            if (!mission.isStateNewlyEntered() && 
+                !commandManager.hasActiveCommand() &&
+                telemetry.arm_state == ArmState::ARMED &&
+                !transit_requested) {
+                // ARM confirmed, transition to TRANSIT (will send SET_MODE_AUTO)
+                transit_requested = true;
+                cout << "[ARMED] Vehicle armed, transitioning to TRANSIT\n";
+                MissionTransitionAuthority::requestTransition(
+                    mission,
+                    mission::MissionEvent::OPERATOR_AUTO_CONFIRM);
+            }
             break;
 
                 case mission::MissionState::TRANSIT:

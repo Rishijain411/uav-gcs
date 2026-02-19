@@ -146,6 +146,7 @@ struct TelemetryData {
 
     // ---------- Last PX4 status text ----------
     char last_status_text[50] = {0};
+    bool status_text_updated = false;
 
     // ---------- Target / Engagement Telemetry ----------
     bool target_detected = false;

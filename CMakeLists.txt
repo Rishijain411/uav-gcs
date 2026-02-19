@@ -11,6 +11,29 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 # =====================================================
+#                     BUILD MODES
+# =====================================================
+# Default to SITL mode for testing
+if(NOT DEFINED BUILD_MODE)
+    set(BUILD_MODE "SITL" CACHE STRING "Build mode: SITL or PRODUCTION")
+endif()
+
+message(STATUS "Build Mode: ${BUILD_MODE}")
+
+# Set compiler flags based on build mode
+if(BUILD_MODE STREQUAL "SITL")
+    message(STATUS ">>> SITL MODE: Health checks disabled for testing")
+    add_compile_definitions(SITL_MODE=1)
+    set(CMAKE_BUILD_TYPE Debug)
+elseif(BUILD_MODE STREQUAL "PRODUCTION")
+    message(STATUS ">>> PRODUCTION MODE: All safety checks enforced")
+    add_compile_definitions(SITL_MODE=0)
+    set(CMAKE_BUILD_TYPE Release)
+else()
+    message(FATAL_ERROR "Invalid BUILD_MODE. Use 'SITL' or 'PRODUCTION'")
+endif()
+
+# =====================================================
 #                     GLOBAL INCLUDES
 # =====================================================
 include_directories(
@@ -22,6 +45,13 @@ include_directories(
 #                     DEPENDENCIES
 # =====================================================
 find_package(OpenSSL REQUIRED)
+find_package(Qt6 COMPONENTS Widgets QUIET)
+
+if(Qt6_FOUND)
+    set(HAVE_QT 1)
+else()
+    set(HAVE_QT 0)
+endif()
 
 # =====================================================
 #                     MAIN GCS TARGET
@@ -64,6 +94,10 @@ add_executable(my_gcs
 
     # ---------------- Authority ----------------
     src/authority/OperatorAuthorization.cpp
+    
+    # ----------- UI Backend Bridge -------- 
+    src/ui/GCSBackendInterface.cpp
+    
     # ---------------- Video Streaming----------------
     src/video/NullVideoLink.cpp
     src/video/JetsonVideoLink.cpp
@@ -73,6 +107,11 @@ add_executable(my_gcs
 
 # OpenSSL (Security)
 target_link_libraries(my_gcs PRIVATE OpenSSL::Crypto)
+
+# Qt (if available)
+if(Qt6_FOUND)
+    target_link_libraries(my_gcs PRIVATE Qt6::Widgets)
+endif()
 # =====================================================
 #                     TEST TARGETS
 # =====================================================

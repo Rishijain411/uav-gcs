@@ -6,6 +6,7 @@
 #include <QStackedLayout>
 #include <QImage>
 #include <QGraphicsDropShadowEffect>
+#include <QToolTip>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QFile>
@@ -1552,6 +1553,52 @@ void MainWindow::updateCurrentWaypoint(uint16_t seq) {
     }
 }
 
+void MainWindow::onStatusUpdated(const QString& status) {
+    const QString trimmed = status.trimmed();
+    if (trimmed.isEmpty()) {
+        return;
+    }
+
+    if (trimmed == lastStatusText_) {
+        return;
+    }
+    lastStatusText_ = trimmed;
+
+    appendAuditLog("[PX4] " + trimmed, "#94A3B8");
+
+    const QString lower = trimmed.toLower();
+    const bool isCritical =
+        lower.contains("preflight") ||
+        lower.contains("mag") ||
+        lower.contains("ekf") ||
+        lower.contains("gps") ||
+        lower.contains("accel") ||
+        lower.contains("gyro") ||
+        lower.contains("health") ||
+        lower.contains("fail") ||
+        lower.contains("critical") ||
+        lower.contains("denied");
+
+    if (isCritical && btnArm) {
+        if (armButtonBaseStyle_.isEmpty()) {
+            armButtonBaseStyle_ = btnArm->styleSheet();
+        }
+
+        btnArm->setStyleSheet(armButtonBaseStyle_ +
+            " QPushButton { border: 2px solid #EF4444; } ");
+
+        const QPoint popupPos = btnArm->mapToGlobal(
+            QPoint(btnArm->width() / 2, 0));
+        QToolTip::showText(popupPos, trimmed, btnArm, QRect(), 3000);
+
+        QTimer::singleShot(3000, this, [this]() {
+            if (btnArm) {
+                btnArm->setStyleSheet(armButtonBaseStyle_);
+            }
+        });
+    }
+}
+
 void MainWindow::displayError(const QString& error) {
     if (lastErrorMessage_ != error) {
         appendAuditLog("[ERROR] " + error, "#DC2626");
@@ -1627,4 +1674,25 @@ void MainWindow::onMissionCompleted() {
     if (btnArm) btnArm->setEnabled(false);
     if (btnTakeoff) btnTakeoff->setEnabled(false);
     if (btnEngageHold) btnEngageHold->setEnabled(false);
+}
+
+void MainWindow::onHealthStatusUpdated(bool ekf_ok, bool battery_ok, bool heartbeat_ok) {
+    if (chkMotors) {
+        chkMotors->setChecked(ekf_ok);
+        chkMotors->setStyleSheet(ekf_ok ? 
+            "QCheckBox { color: #10B981; font-weight: bold; }" : 
+            "QCheckBox { color: #EF4444; }");
+    }
+    if (chkBattery) {
+        chkBattery->setChecked(battery_ok);
+        chkBattery->setStyleSheet(battery_ok ? 
+            "QCheckBox { color: #10B981; font-weight: bold; }" : 
+            "QCheckBox { color: #EF4444; }");
+    }
+    if (chkMavlink) {
+        chkMavlink->setChecked(heartbeat_ok);
+        chkMavlink->setStyleSheet(heartbeat_ok ? 
+            "QCheckBox { color: #10B981; font-weight: bold; }" : 
+            "QCheckBox { color: #EF4444; }");
+    }
 }

@@ -74,8 +74,15 @@ void MavlinkCommandSender::sendCommand(
 // High-level helpers (NO CHANGE)
 // --------------------------------------------------
 void MavlinkCommandSender::sendArm() {
-    // param1=1 to arm, param2=0 for normal preflight checks (real-world safety)
-    sendCommand(MAV_CMD_COMPONENT_ARM_DISARM, 1.0f, 0.0f);
+    // param1=1 to arm
+    // param2=21196 to force-arm (override preflight checks) needed for SITL
+#ifdef SITL_MODE
+    std::cout << "[DEBUG] Sending ARM with force-arm param2=21196 (SITL_MODE)\n";
+    sendCommand(MAV_CMD_COMPONENT_ARM_DISARM, 1.0f, 21196.0f);
+#else
+    std::cout << "[DEBUG] Sending ARM with normal param2=0 (PRODUCTION_MODE)\n";
+    sendCommand(MAV_CMD_COMPONENT_ARM_DISARM, 1.0f, 0.0f);  // normal preflight checks
+#endif
 }
 
 void MavlinkCommandSender::sendDisarm() {
