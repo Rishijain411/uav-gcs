@@ -1,5 +1,6 @@
 #include "ui/MainWindow_QGC.h"
 #include "mission/MissionProfileParser.h"
+#include "ui/GCSBackendInterface.h"
 #include <QFileInfo>
 #include <QPixmap>
 #include <QGraphicsOpacityEffect>
@@ -434,7 +435,20 @@ void MainWindow::createLeftSidebar(QWidget* parent) {
     cmbGpsJamming = new QComboBox();
     cmbGpsJamming->addItems({"RTL (Dead Reckoning)", "LOITER", "HOLD", "LAND"});
     cmbGpsJamming->setCurrentIndex(0);
+    // --- Step 2: Connect Failsafe UI to Backend ---
+    auto onFailsafeChanged = [this]() {
+        if (backend_) {
+            backend_->updateFailsafeRules(
+                cmbCommsLoss->currentIndex(),
+                cmbLowBattery->currentIndex(),
+                cmbGpsJamming->currentIndex()
+            );
+        }
+    };
 
+    connect(cmbCommsLoss, QOverload<int>::of(&QComboBox::currentIndexChanged), onFailsafeChanged);
+    connect(cmbLowBattery, QOverload<int>::of(&QComboBox::currentIndexChanged), onFailsafeChanged);
+    connect(cmbGpsJamming, QOverload<int>::of(&QComboBox::currentIndexChanged), onFailsafeChanged);
     advLayout->addWidget(new QLabel("Comms Loss"));
     advLayout->addWidget(cmbCommsLoss);
     advLayout->addWidget(new QLabel("Low Battery"));
@@ -987,19 +1001,11 @@ void MainWindow::updateDisplay() {
 }
 
 void MainWindow::onArmClicked() {
-    if (!missionProfileLoaded_) {
-        appendAuditLog("[DENIED] ARM blocked until mission profile loaded", "#F87171");
-        return;
-    }
-    if (!preflightConfirmed_) {
-        appendAuditLog("[DENIED] ARM blocked until pre-flight", "#F87171");
-        return;
-    }
-    setCommandPending(btnArm, "ARM");
-    appendAuditLog("[REQUEST] ARM", "#D97706");
-    // Wait for updateArmState(true) from backend before setting armConfirmed_
-    
-    // Send to backend
+    if (!missionProfileLoaded_ || !preflightConfirmed_) return;
+
+    setCommandPending(btnArm, "ARM"); // Now waits for real backend signal
+    appendAuditLog("[REQUEST] Sending ARM to Backend...", "#D97706");
+
     if (backend_) {
         backend_->sendArmCommand();
     }
@@ -1373,11 +1379,10 @@ void MainWindow::onBdaUnknown() {
 
 void MainWindow::setCommandPending(QPushButton* button, const QString& baseText) {
     if (!button) return;
-    button->setText(baseText + " (PENDING)");
+    // The button now stays in this state until the backend emits a real ACK signal
+    button->setText(baseText + " (WAITING ACK...)");
     button->setEnabled(false);
-    QTimer::singleShot(700, this, [this, button, baseText]() {
-        setCommandAcked(button, baseText);
-    });
+    // Logic Fix: QTimer::singleShot removed to prevent "fake" success messages.
 }
 
 void MainWindow::setCommandAcked(QPushButton* button, const QString& baseText) {
@@ -1694,5 +1699,36 @@ void MainWindow::onHealthStatusUpdated(bool ekf_ok, bool battery_ok, bool heartb
         chkMavlink->setStyleSheet(heartbeat_ok ? 
             "QCheckBox { color: #10B981; font-weight: bold; }" : 
             "QCheckBox { color: #EF4444; }");
+    }
+}
+void MainWindow::onPayloadArmingCountdown(int seconds) {
+    if (seconds > 0) {
+        if (lblMissionStatus) {
+            lblMissionStatus->setText(QString("⚠️ ARMING PAYLOAD: %1s").arg(seconds));
+            lblMissionStatus->setStyleSheet("QLabel { color: #DC2626; font-weight: bold; font-size: 18px; }");
+            
+            // Safety: Only create the effect if it doesn't already exist
+            if (!lblMissionStatus->graphicsEffect()) {
+                auto* alertGlow = new QGraphicsDropShadowEffect(this);
+                alertGlow->setBlurRadius(15);
+                alertGlow->setColor(QColor(220, 38, 38, 150));
+                lblMissionStatus->setGraphicsEffect(alertGlow);
+            }
+        }
+        statusBar()->showMessage(QString("CRITICAL: Arming Sequence - %1s").arg(seconds));
+    } else {
+        if (lblMissionStatus) {
+            lblMissionStatus->setGraphicsEffect(nullptr); // Properly deletes the effect
+            lblMissionStatus->setText("STATUS: PAYLOAD READY");
+            lblMissionStatus->setStyleSheet("QLabel { color: #10B981; font-weight: bold; }");
+        }
+        statusBar()->showMessage("Payload ARMED - Safety Released", 3000);
+    }
+}
+void MainWindow::onPayloadArmingRequested() {
+    appendAuditLog("[CRITICAL] Explosive Arming Authorization Required!", "#EF4444");
+    if (lblMissionStatus) {
+        lblMissionStatus->setText("AUTHORIZE ARMING");
+        lblMissionStatus->setStyleSheet("color: #EF4444; font-weight: bold;");
     }
 }

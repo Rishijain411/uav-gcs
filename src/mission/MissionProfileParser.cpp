@@ -206,6 +206,23 @@ namespace mission {
                 }
             }
         }
+        // Parse performance section
+        size_t perf_pos = json_content.find("\"performance\"");
+        if (perf_pos != std::string::npos) {
+            size_t speed_pos = json_content.find("\"cruise_speed_m_s\"", perf_pos);
+            if (speed_pos != std::string::npos) {
+                size_t colon = json_content.find(':', speed_pos);
+                size_t end = json_content.find_first_of(",}", colon + 1);
+                profile.performance.cruise_speed_m_s = std::stod(json_content.substr(colon + 1, end - colon - 1));
+            }
+            
+            size_t radius_pos = json_content.find("\"acceptance_radius_m\"", perf_pos);
+            if (radius_pos != std::string::npos) {
+                size_t colon = json_content.find(':', radius_pos);
+                size_t end = json_content.find_first_of(",}", colon + 1);
+                profile.performance.acceptance_radius_m = std::stod(json_content.substr(colon + 1, end - colon - 1));
+            }
+        }
         
         // Parse payload_policy
         size_t payload_pos = json_content.find("\"payload_policy\"");

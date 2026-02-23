@@ -122,7 +122,14 @@ void MavlinkCommandSender::sendSetModeLoiter() {
         MAV_MODE_FLAG_CUSTOM_MODE_ENABLED
     );
 }
-
+void MavlinkCommandSender::sendSpeed(float speed_m_s) {
+    // MAV_CMD_DO_CHANGE_SPEED: 
+    // param1: Speed type (0=Airspeed, 1=Groundspeed)
+    // param2: Speed (m/s)
+    // param3: Throttle (-1=no change)
+    sendCommand(MAV_CMD_DO_CHANGE_SPEED, 1.0f, speed_m_s, -1.0f);
+    std::cout << "[DEBUG] Sending Speed Command: " << speed_m_s << " m/s" << std::endl;
+}
 // --------------------------------------------------
 // Phase C: Send search waypoint via SET_POSITION_TARGET_GLOBAL_INT
 // --------------------------------------------------

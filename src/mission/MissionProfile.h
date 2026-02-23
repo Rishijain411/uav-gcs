@@ -58,6 +58,15 @@ struct MissionCrypto {
         return !key_id.empty();
     }
 };
+struct PerformanceConstraints {
+    double cruise_speed_m_s = 10.0;     // Default 10m/s
+    double acceptance_radius_m = 5.0;  // Default 5m
+};
+
+struct EngagementThresholds {
+    double min_confidence = 0.8;
+    double max_range_m = 1000.0;
+};
 
 
 // Mission Profile (PRD Phase 1)
@@ -86,6 +95,10 @@ struct MissionProfile {
     // Mission crypto
     MissionCrypto crypto;
     
+    // below is for test_mission_v2.json
+    PerformanceConstraints performance;
+    EngagementThresholds thresholds;
+
     // Validation
     bool isValid() const {
         return search_area.isValid() &&

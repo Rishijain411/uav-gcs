@@ -85,7 +85,8 @@ public slots:
     void onLandingDetected();
     void onMissionCompleted();
     void onHealthStatusUpdated(bool ekf_ok, bool battery_ok, bool heartbeat_ok);
-
+    void onPayloadArmingCountdown(int seconds);
+    void onPayloadArmingRequested();
 private:
     enum class MissionUploadStatus {
         NOT_LOADED,

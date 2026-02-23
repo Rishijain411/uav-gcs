@@ -28,7 +28,9 @@ extern "C" {
 IntegratedBackend::IntegratedBackend(GCSBackendInterface* ui_interface)
     : ui_interface_(ui_interface), running_(false), mission_load_requested_(false),
       arm_requested_(false), disarm_requested_(false), takeoff_requested_(false),
-      abort_requested_(false), engage_requested_(false) {}
+      abort_requested_(false), engage_requested_(false),
+      rtl_requested_(false), land_requested_(false) 
+{}
 
 IntegratedBackend::~IntegratedBackend() {
     stop();
@@ -83,6 +85,12 @@ void IntegratedBackend::sendRtlCommand() {
 void IntegratedBackend::sendLandCommand() {
     land_requested_ = true;
 }
+void IntegratedBackend::updateFailsafeRules(int comms, int battery, int gps) {
+    pending_comms_loss_.store(comms);
+    pending_low_battery_.store(battery);
+    pending_gps_jamming_.store(gps);
+    failsafe_update_pending_.store(true);
+}
 
 void IntegratedBackend::runBackendLoop() {
     TelemetryData telemetry;
@@ -134,6 +142,34 @@ void IntegratedBackend::runBackendLoop() {
     auto last_status_text_time = std::chrono::steady_clock::time_point::min();
     
     while (running_) {
+        // Check for failsafe rule overrides from the UI
+        if (failsafe_update_pending_.load()) {
+            mission::FailsafeRules rules;
+            
+            // UI mapping: 0:RTL, 1:LAND, 2:HOLD, 3:CONTINUE (based on MainWindow setup)
+            auto mapUI = [](int index) {
+                switch(index) {
+                    case 1: return mission::FailsafeBehavior::LAND;
+                    case 2: return mission::FailsafeBehavior::HOLD;
+                    case 3: return mission::FailsafeBehavior::CONTINUE;
+                    default: return mission::FailsafeBehavior::RTL;
+                }
+            };
+
+            rules.comms_loss = mapUI(pending_comms_loss_.load());
+            rules.low_battery = mapUI(pending_low_battery_.load());
+            
+            // GPS UI mapping: 0:RTL, 1:LOITER(CONTINUE), 2:HOLD, 3:LAND
+            int gpsIdx = pending_gps_jamming_.load();
+            if (gpsIdx == 1) rules.gps_jamming = mission::FailsafeBehavior::CONTINUE;
+            else if (gpsIdx == 2) rules.gps_jamming = mission::FailsafeBehavior::HOLD;
+            else if (gpsIdx == 3) rules.gps_jamming = mission::FailsafeBehavior::LAND;
+            else rules.gps_jamming = mission::FailsafeBehavior::RTL;
+
+            mission.updateFailsafeRules(rules);
+            failsafe_update_pending_.store(false);
+            std::cout << "[BACKEND] Applied UI failsafe overrides to mission profile\n";
+        }
         auto now = std::chrono::steady_clock::now();
         
         // Send heartbeat
@@ -356,16 +392,32 @@ void IntegratedBackend::runBackendLoop() {
             arm_requested_ = false;
         }
         
-        // Check for ARM command ACK and notify UI immediately
-        // This ensures UI updates armConfirmed_ as soon as ARM succeeds, not waiting for heartbeat
-        // BUT: Don't consume the ACK here - let CommandManager handle it first
+        // REAL-TIME COMMAND ACKNOWLEDGMENT BRIDGE
+        // This handles feedback for ARM, TAKEOFF, and other mission commands
         if (telemetry.last_command_ack.valid) {
-            if (telemetry.last_command_ack.command_id == MAV_CMD_COMPONENT_ARM_DISARM &&
-                telemetry.last_command_ack.result == MAV_RESULT_ACCEPTED) {
-                // ARM command accepted - notify UI immediately (don't wait for heartbeat)
-                emit ui_interface_->armStateChanged(true);
-                // Don't consume ACK here - CommandManager needs it to clear active command
+            uint16_t cmd_id = telemetry.last_command_ack.command_id;
+            uint8_t result = telemetry.last_command_ack.result;
+
+            if (result == MAV_RESULT_ACCEPTED) {
+                if (cmd_id == MAV_CMD_COMPONENT_ARM_DISARM) {
+                    emit ui_interface_->armStateChanged(true);
+                    std::cout << "[BACKEND] ARM Accepted by vehicle\n";
+                } 
+                else if (cmd_id == MAV_CMD_NAV_TAKEOFF) {
+                    emit ui_interface_->statusUpdated("TAKEOFF Accepted - Vehicle is airborne");
+                    std::cout << "[BACKEND] TAKEOFF Accepted\n";
+                }
+                // Add other mission-critical command IDs here as needed
+            } 
+            else if (result == MAV_RESULT_DENIED || result == MAV_RESULT_TEMPORARILY_REJECTED) {
+                // Bridge rejections back to the UI audit log and error popups
+                QString errorMsg = QString("Command %1 Rejected: Check Pre-Flight/GPS").arg(cmd_id);
+                emit ui_interface_->errorOccurred(errorMsg);
+                std::cout << "[BACKEND] Command " << cmd_id << " REJECTED with code: " << (int)result << "\n";
             }
+            
+            // Note: We do NOT set valid = false here. 
+            // commandManager.update() below needs to see this ACK to clear its internal state.
         }
         
         if (disarm_requested_ && sender_initialized && cmdSender) {

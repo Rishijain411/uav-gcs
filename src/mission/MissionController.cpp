@@ -13,6 +13,16 @@
 #include <optional>
 #include <atomic>
 #include <type_traits>
+// Static helper to map configured failsafe behaviors to MAVLink commands
+static VehicleCommand behaviorToCommand(mission::FailsafeBehavior b) {
+    switch(b) {
+        case mission::FailsafeBehavior::LAND:     return VehicleCommand::LAND;
+        case mission::FailsafeBehavior::HOLD:     return VehicleCommand::SET_MODE_LOITER;
+        case mission::FailsafeBehavior::CONTINUE: return VehicleCommand::SET_MODE_AUTO;
+        case mission::FailsafeBehavior::RTL:      
+        default:                                  return VehicleCommand::SET_MODE_RTL;
+    }
+}
 
 MissionController::MissionController()
     : engagement_policy_([]{
@@ -331,6 +341,20 @@ void MissionController::handleSearch(
     const auto now = std::chrono::steady_clock::now();
 
     if (last_state_ != mission::MissionState::SEARCH) {
+        
+        if (cmd_manager_) {
+            double speed = mission.getProfile().performance.cruise_speed_m_s;
+            std::cout << "[SEARCH] Setting cruise speed to: " << speed << " m/s\n";
+            
+            // This sends MAV_CMD_DO_CHANGE_SPEED (cmd=178)
+            cmd_manager_->requestCommand(
+                VehicleCommand::SET_SPEED,
+                SystemState::ARMED,
+                mission.state(),
+                telemetry,
+                static_cast<float>(speed) 
+            );
+        }
 
         if (!search_pattern_) {
 
@@ -438,20 +462,20 @@ void MissionController::handleSearch(
         return;
     }
 
-    // Check if vehicle reached current waypoint
+   // Check if vehicle reached current waypoint
     double dlat = telemetry.latitude_deg  - current_waypoint_.lat;
     double dlon = telemetry.longitude_deg - current_waypoint_.lon;
-
     double distance_sq = dlat*dlat + dlon*dlon;
 
-    // 5m threshold in degrees (~5e-5 deg ≈ 5m)
-    constexpr double ARRIVAL_THRESHOLD_SQ = 25e-10;  // (5e-5)^2
+    // DYNAMIC FIX: Use the acceptance radius from the mission profile
+    // Conversion: 1 meter is approximately 0.0000089 degrees
+    double radius_m = mission.getProfile().performance.acceptance_radius_m;
+    double radius_deg = radius_m * 0.000009; 
+    double arrival_threshold_sq = radius_deg * radius_deg;
 
-    if (distance_sq < ARRIVAL_THRESHOLD_SQ) {
-
+    if (distance_sq < arrival_threshold_sq) {
         current_waypoint_active_ = false;
-
-        std::cout << "[SEARCH] Waypoint reached\n";
+        std::cout << "[SEARCH] Waypoint reached (Radius: " << radius_m << "m)\n";
     }
 }
 /* ---------------- ENGAGE ---------------- */
@@ -468,32 +492,70 @@ void MissionController::handleEngage(
         telemetry.target_closing_speed
     };
 
-    // 1. VALIDATION: Check target presence and minimum closing speed threshold (5.0 m/s)
+    // 1. VALIDATION: Check target presence
     if (!telemetry.target_detected || !engagement_policy_.checkClosingSpeed(track)) {
         engagement_policy_.registerMiss();
-
-        AuditLogger::logDecision(
-            VehicleCommand::NONE,
-            mission.state(),
-            "ENGAGEMENT_MISS",
-            "Target lost or insufficient closing speed");
-
-        MissionTransitionAuthority::requestTransition(
-            mission,
-            mission::MissionEvent::ENGAGEMENT_FAILED);
+        AuditLogger::logDecision(VehicleCommand::NONE, mission.state(), "ENGAGEMENT_MISS", "Target lost");
+        MissionTransitionAuthority::requestTransition(mission, mission::MissionEvent::ENGAGEMENT_FAILED);
         return;
     }
 
-    // 2. POLICY EVALUATION: Check lock confidence and attempt counts
+    // 2. POLICY EVALUATION
     EngagementDecision decision = engagement_policy_.evaluate(track);
 
-    // 3. STRICT OITL (PRD: No "Ghost" Commands): Force authorization for initial strike
-    // If the policy suggests ENGAGE but we haven't attempted yet, treat as REQUEST_CONFIRM.
+    // 3. STRICT OITL (PRD: Force authorization for initial strike)
     if (decision == EngagementDecision::ENGAGE && engagement_policy_.getAttemptCount() == 0) {
         decision = EngagementDecision::REQUEST_CONFIRM;
     }
 
-    // 4. AUTHORIZATION HANDLER
+    // --- 4. EXPLOSIVE SAFETY GATE (WITH LATCHING TIMER & UI SYNC) ---
+    const auto& policy = mission.getProfile().payload_policy;
+    if (policy.type == mission::PayloadType::EXPLOSIVE && !payload_armed_confirmed_) {
+        
+        if (!OperatorAuthorization::hasPending()) {
+            std::cout << "[SAFETY] Explosive Payload Detected. Requesting ARMING Authorization.\n";
+            OperatorAuthorization::request(VehicleCommand::ARM_PAYLOAD, mission.state());
+            return; 
+        }
+
+        auto auth = OperatorAuthorization::pollDecision();
+        if (auth.has_value() && auth.value()) {
+             // LATCHING: Send command once and start the clock
+             if (cmd_manager_ && !arming_request_sent_) {
+                 cmd_manager_->requestCommand(VehicleCommand::ARM_PAYLOAD, SystemState::ARMED, mission.state(), telemetry);
+                 arming_request_sent_ = true;
+                 arming_start_time_ = std::chrono::steady_clock::now();
+             }
+            // Calculate time remaining with the local variable you defined
+             auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - arming_start_time_).count();
+             double elapsed_secs = elapsed_ms / 1000.0;
+             
+             // Calculate time remaining (Using your local elapsed_secs variable)
+             int remaining = static_cast<int>(policy.arming_delay_seconds - elapsed_secs);
+
+             if (remaining > 0) {
+                 if (ui_interface_) ui_interface_->sendPayloadArmingCountdown(remaining); 
+                 return; 
+             } 
+             else {
+                 payload_armed_confirmed_ = true; 
+                 if (ui_interface_) ui_interface_->sendPayloadArmingCountdown(0); 
+
+                 // Correct Backend Logging
+                 AuditLogger::logDecision(VehicleCommand::ARM_PAYLOAD, mission.state(), 
+                                        "PAYLOAD_ARMED", "Timer Complete");
+                 OperatorAuthorization::consumeDecision();
+             }
+        } else if (auth.has_value() && !auth.value()) {
+            MissionTransitionAuthority::requestTransition(mission, mission::MissionEvent::SYSTEM_FAILURE, MissionAbortReason::OPERATOR_DENIED);
+            OperatorAuthorization::consumeDecision();
+            return;
+        }
+        return; 
+    }
+
+    // --- 5. STRIKE AUTHORIZATION HANDLER ---
     if (decision == EngagementDecision::REQUEST_CONFIRM) {
         if (!OperatorAuthorization::hasPending()) {
             OperatorAuthorization::request(VehicleCommand::NONE, mission.state());
@@ -503,56 +565,30 @@ void MissionController::handleEngage(
         auto auth = OperatorAuthorization::pollDecision();
         if (!auth.has_value()) return;
 
-        OperatorAuthorization::consumeDecision(); // Clear request after decision
+        OperatorAuthorization::consumeDecision(); 
 
         if (!auth.value()) {
-            MissionTransitionAuthority::requestTransition(
-                mission,
-                mission::MissionEvent::SYSTEM_FAILURE,
-                MissionAbortReason::OPERATOR_DENIED);
+            MissionTransitionAuthority::requestTransition(mission, mission::MissionEvent::SYSTEM_FAILURE, MissionAbortReason::OPERATOR_DENIED);
             return;
         }
 
-        // Operator approved: move state to authorized engagement
-        MissionTransitionAuthority::requestTransition(
-            mission,
-            mission::MissionEvent::OPERATOR_ENGAGE_CONFIRM);
-        
+        MissionTransitionAuthority::requestTransition(mission, mission::MissionEvent::OPERATOR_ENGAGE_CONFIRM);
         decision = EngagementDecision::ENGAGE;
     }
 
-    // 5. PHASE 3: TERMINAL GUIDANCE (Proportional Navigation)
+    // --- 6. PHASE 3: TERMINAL GUIDANCE (Pro-Nav) ---
     if (decision == EngagementDecision::ENGAGE || decision == EngagementDecision::REENGAGE) {
-        
-        // PHASE 3: Terminal Guidance Execution
-        // Map interceptor position and velocity from telemetry
         Vector3D interceptor_pos(telemetry.latitude_deg, telemetry.longitude_deg, telemetry.relative_alt_m);
-        
-        // NOTE: Placeholder target_pos until Radar/AI data is added to TelemetryData.h
         Vector3D target_pos(0, 0, 0); 
-        Vector3D interceptor_vel(0, 0, 0); // Requires NED velocities from telemetry
+        Vector3D interceptor_vel(0, 0, 0); 
         Vector3D target_vel(0, 0, 0);
 
-        Vector3D accel = pro_nav_.calculateAcceleration(
-            interceptor_pos,
-            target_pos,
-            interceptor_vel,
-            target_vel,
-            0.1 // 10Hz DT based on search_gen_interval_
-        );
+        Vector3D accel = pro_nav_.calculateAcceleration(interceptor_pos, target_pos, interceptor_vel, target_vel, 0.1);
 
-        if (cmd_manager_) {
-            cmd_manager_->sendAccelerationCommand(accel);
-        }
-
-        AuditLogger::logDecision(
-            VehicleCommand::NONE,
-            mission.state(),
-            "TERMINAL_GUIDANCE",
-            "Pro-Nav active: Accel Magnitude = " + std::to_string(accel.magnitude()));
+        if (cmd_manager_) cmd_manager_->sendAccelerationCommand(accel);
+        AuditLogger::logDecision(VehicleCommand::NONE, mission.state(), "TERMINAL_GUIDANCE", "Pro-Nav active");
     }
 }
-
 /* ---------------- RECOVERY ---------------- */
 
 void MissionController::handleRecovery(
@@ -580,8 +616,10 @@ void MissionController::handleRecovery(
     else if (mission.state() == mission::MissionState::ABORTED) {
 
         if (telemetry.in_failsafe) {
-            recovery_cmd = VehicleCommand::LAND;
-            reason = "Mission aborted — CRITICAL, LAND";
+            // DYNAMIC FIX: Respect the rules configured via UI or JSON profile
+            mission::FailsafeBehavior rule = mission.getProfile().failsafe_rules.comms_loss;
+            recovery_cmd = behaviorToCommand(rule);
+            reason = "Failsafe Active: Executing configured rule (" + std::to_string(static_cast<int>(rule)) + ")";
         }
         else if (telemetry.isAirborne()) {
             recovery_cmd = VehicleCommand::SET_MODE_RTL;

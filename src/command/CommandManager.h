@@ -29,7 +29,8 @@ public:
         VehicleCommand cmd,
         SystemState system_state,
         mission::MissionState mission_state,
-        const TelemetryData& telemetry);
+        const TelemetryData& telemetry,
+        float param1 = 0.0f);
 
     void update(
         const TelemetryData& telemetry,

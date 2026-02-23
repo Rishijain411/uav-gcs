@@ -38,7 +38,8 @@ public:
     void onRecoveryPlanUpdated(const QString& plan);
     void onLandingDetected();
     void onMissionCompleted();
-
+    void sendPayloadArmingCountdown(int seconds) { emit payloadArmingCountdown(seconds); }
+    void sendPayloadArmingRequested() { emit payloadArmingRequested(); }
 signals:
     // Connection
     void connectionStatusChanged(const QString& status);
@@ -81,7 +82,8 @@ signals:
     // General
     void statusUpdated(const QString& status);
     void errorOccurred(const QString& error);
-
+    void payloadArmingCountdown(int seconds_remaining);
+    void payloadArmingRequested();
 private:
     TelemetryData last_telemetry_;
 };

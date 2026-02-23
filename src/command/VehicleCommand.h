@@ -9,5 +9,8 @@ enum class VehicleCommand {
     SET_MODE_LOITER,   //phase 4 req
     TAKEOFF,
     LAND,
-    SET_HOME   //prd phase 4 req
+    SET_HOME, //prd phase 4 req
+    SET_SPEED,
+    ARM_PAYLOAD,     
+    DISARM_PAYLOAD
 };

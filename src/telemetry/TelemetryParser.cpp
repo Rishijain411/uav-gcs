@@ -167,8 +167,8 @@ void TelemetryParser::parse(uint8_t byte) {
 
     // ================= COMMAND ACK =================
     case MAVLINK_MSG_ID_COMMAND_ACK: {
-        if (telemetry.last_command_ack.valid)
-            break;
+        //if (telemetry.last_command_ack.valid)
+           // break;
 
         mavlink_command_ack_t ack;
         mavlink_msg_command_ack_decode(&msg, &ack);

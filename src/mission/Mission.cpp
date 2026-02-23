@@ -146,6 +146,10 @@ void Mission::setAbortReason(MissionAbortReason reason) {
 MissionAbortReason Mission::getAbortReason() const {
     return abort_reason_;
 }
-
+void Mission::updateFailsafeRules(const FailsafeRules& rules) {
+    if (profile_) {
+        profile_->failsafe_rules = rules;
+    }
+}
 
 } // namespace mission

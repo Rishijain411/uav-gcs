@@ -26,6 +26,8 @@ public:
     void sendEngageCommand();
     void sendRtlCommand();
     void sendLandCommand();
+    void updateFailsafeRules(int comms, int battery, int gps);
+    GCSBackendInterface* getInterface() const { return ui_interface_; }
     
 private:
     void runBackendLoop();
@@ -45,4 +47,9 @@ private:
     // Thread-safe mission file access
     std::mutex mission_file_mutex_;
     std::string mission_file_;
+    // below is for fail safe 
+    std::atomic<bool> failsafe_update_pending_{false};
+    std::atomic<int> pending_comms_loss_{-1};
+    std::atomic<int> pending_low_battery_{-1};
+    std::atomic<int> pending_gps_jamming_{-1};
 };

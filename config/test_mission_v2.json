@@ -1,0 +1,44 @@
+{
+  "target_id": "ALPHA_STRIKE_BETA",
+  "schema_version": 1,
+
+  "security": {
+    "mode": "PLAINTEXT"
+  },
+
+  "crypto": {
+    "key_id": "SECURE_DEPLOY_02",
+    "key_epoch": 2,
+    "mission_key_hex": "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
+  },
+
+  "search_area": {
+    "vertices": [
+      [47.3970, 8.5440, 40.0],
+      [47.4000, 8.5440, 40.0],
+      [47.4000, 8.5480, 40.0],
+      [47.3970, 8.5480, 40.0]
+    ],
+    "min_altitude_m": 20.0,
+    "max_altitude_m": 120.0
+  },
+
+  "waypoints": [
+    [47.3975, 8.5445, 45.0],
+    [47.3995, 8.5450, 75.0],
+    [47.3995, 8.5475, 100.0],
+    [47.3975, 8.5475, 50.0]
+  ],
+
+  "payload_policy": {
+    "type": "EXPLOSIVE",
+    "arm_on_engagement": false,
+    "arming_delay_seconds": 5.0
+  },
+
+  "failsafe_rules": {
+    "comms_loss": "HOLD",
+    "low_battery": "LAND",
+    "gps_jamming": "CONTINUE"
+  }
+}

@@ -25,7 +25,7 @@ public:
     void sendSetModeAuto();
     void sendSetModeRTL();
     void sendSetModeLoiter();
-
+    void sendSpeed(float speed_m_s);
 
     // Phase C: Search waypoint
     void sendSearchWaypoint(const GeoPoint& waypoint);

@@ -44,7 +44,7 @@ public:
     
     BitStatus getBitStatus() const { return bit_status_; }
     void setBitStatus(const BitStatus& status) { bit_status_ = status; }
-
+    void updateFailsafeRules(const FailsafeRules& rules);
 private:
     MissionState current_state_;
     bool state_just_changed_ = false;  // NEW: Track state transitions

@@ -59,6 +59,9 @@ private:
     bool takeoff_requested_ = false;
     bool takeoff_completed_ = false;
     bool auto_mode_sent_ = false;
+    bool payload_armed_confirmed_ = false;
+    bool arming_request_sent_ = false;
+    std::chrono::steady_clock::time_point arming_start_time_;
     
     // Arm stability tracking: wait for consistent health before transitioning to AUTO
     int arm_stable_frames_ = 0;

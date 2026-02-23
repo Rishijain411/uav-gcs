@@ -82,7 +82,7 @@ bool CommandManager::requestCommand(
     VehicleCommand cmd,
     SystemState system_state,
     mission::MissionState mission_state,
-    const TelemetryData& telemetry)
+    const TelemetryData& telemetry,float param1)
 {
     if (active_command_.has_value()) {
         std::cout << "[CMD] Rejected: command already active\n";
@@ -127,17 +127,26 @@ bool CommandManager::requestCommand(
 
     // Special handling for ARM command to send force-arm parameter
     if (cmd == VehicleCommand::ARM) {
-        sender_->sendArm();  // Uses force-arm param2=21196 in SITL_MODE
-    } else {
-        sender_->sendRawCommand(tc.mavlink_cmd_id);  // Generic command with no parameters
+        sender_->sendArm(); // Uses force-arm param2=21196 in SITL_MODE
+    } else if (cmd == VehicleCommand::SET_SPEED) {
+        // MAV_CMD_DO_CHANGE_SPEED: p1=Type(1=Airspeed), p2=Speed(m/s), p3=Throttle
+        sender_->sendSpeed(param1);
+    } 
+    else {
+        sender_->sendRawCommand(tc.mavlink_cmd_id);
     }
 
+    if (cmd == VehicleCommand::ARM_PAYLOAD) {
+    // Map to MAVLink ID 246 (PREFLIGHT_STORAGE)
+    sender_->sendRawCommand(246); 
+    }
     std::cout << "[CMD SENT] MAV_CMD="
               << tc.mavlink_cmd_id
               << std::endl;
 
     active_command_ = tc;
     command_timed_out_ = false;
+
 
     return true;
 }
@@ -341,6 +350,10 @@ uint16_t CommandManager::mapToMavlinkCommand(
         return MAV_CMD_DO_SET_HOME;
 
     case VehicleCommand::NONE:
+    case VehicleCommand::SET_SPEED: 
+        return MAV_CMD_DO_CHANGE_SPEED;
+    case VehicleCommand::ARM_PAYLOAD:
+    return 246; // MAV_CMD_PREFLIGHT_STORAGE (Commonly used in SITL for generic arming)
     default:
         std::cerr << "[CMD ERROR] Invalid VehicleCommand mapping\n";
         return 0;

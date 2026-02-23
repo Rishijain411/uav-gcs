@@ -58,7 +58,11 @@ int main(int argc, char *argv[]) {
                     &window, &MainWindow::onLandingDetected);
     QObject::connect(backend_interface, &GCSBackendInterface::missionCompleted,
                     &window, &MainWindow::onMissionCompleted);
-    
+    QObject::connect(backend_interface, &GCSBackendInterface::payloadArmingCountdown,
+                &window, &MainWindow::onPayloadArmingCountdown);
+    // Connection for the initial "Request" alert (Fixed 'this' error)
+    QObject::connect(backend_interface, &GCSBackendInterface::payloadArmingRequested,
+                    &window, &MainWindow::onPayloadArmingRequested);
     // Set backend pointer in MainWindow for direct control
     window.setBackend(backend);
     
