@@ -22,6 +22,6 @@ private:
     double step_;
     int max_legs_;
 
-    int current_leg_ = 0;
+    int legs_generated_ = 0; // total legs emitted so far
     int direction_ = 0; // 0:N, 1:E, 2:S, 3:W
 };

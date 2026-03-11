@@ -1,7 +1,6 @@
 #include "telemetry/TelemetryParser.h"
 #include "telemetry/TelemetryData.h"
 #include "core/StateManager.h"
-
 #include <iostream>
 #include <chrono>
 #include <cstring>
@@ -14,7 +13,7 @@ static mavlink_message_t msg;
 static mavlink_status_t mav_status;
 
 // 🔒 MUST MATCH GCS HEARTBEAT SYSID
-static constexpr uint8_t GCS_SYS_ID = 50;
+static constexpr uint8_t GCS_SYS_ID = 250;
 
 TelemetryParser::TelemetryParser(
     TelemetryData& data,
@@ -31,45 +30,66 @@ void TelemetryParser::parse(uint8_t byte) {
 
     switch (msg.msgid) {
 
+
     // ================= HEARTBEAT =================
     case MAVLINK_MSG_ID_HEARTBEAT: {
         mavlink_heartbeat_t hb;
         mavlink_msg_heartbeat_decode(&msg, &hb);
 
-        // ❌ Ignore our own GCS heartbeat
+        // Ignore our own GCS heartbeat
         if (msg.sysid == GCS_SYS_ID)
             break;
 
         telemetry.system_id = msg.sysid;
         telemetry.component_id = msg.compid;
         telemetry.heartbeat_received = true;
-        telemetry.last_heartbeat_time =
-            std::chrono::steady_clock::now();
+        telemetry.last_heartbeat_time = std::chrono::steady_clock::now();
 
         // ---- ARM STATE ----
         telemetry.arm_state =
             (hb.base_mode & MAV_MODE_FLAG_SAFETY_ARMED)
                 ? ArmState::ARMED
                 : ArmState::DISARMED;
+        if (telemetry.arm_state == ArmState::ARMED) {
+        // emit MissionEvent::VEHICLE_ARMED
+        }
+
+
+        // ---- NAV STATE (PX4 – SAFE DECODE) ----
+        uint8_t main_mode = (hb.custom_mode >> 16) & 0xFF;
+
+        switch (main_mode) {
+        case 1: // PX4_CUSTOM_MAIN_MODE_MANUAL
+            telemetry.nav_state = NavState::MANUAL;
+            break;
+        case 3: // PX4_CUSTOM_MAIN_MODE_POSCTL
+            telemetry.nav_state = NavState::POSCTL;
+            break;
+        case 4: // PX4_CUSTOM_MAIN_MODE_AUTO
+            telemetry.nav_state = NavState::AUTO_MISSION;
+            break;
+        default:
+            telemetry.nav_state = NavState::UNKNOWN;
+            break;
+        }
 
         // ---- FAILSAFE ----
         telemetry.in_failsafe =
             (hb.system_status == MAV_STATE_CRITICAL ||
-             hb.system_status == MAV_STATE_EMERGENCY);
+            hb.system_status == MAV_STATE_EMERGENCY);
 
         if (telemetry.in_failsafe) {
-            telemetry.last_block_reason =
-                CommandBlockReason::FAILSAFE_ACTIVE;
+            telemetry.last_block_reason = CommandBlockReason::FAILSAFE_ACTIVE;
         }
 
         if (stateManager.getState() == SystemState::DISCONNECTED) {
             stateManager.setState(SystemState::CONNECTED);
         }
 
-        std::cout << "[HEARTBEAT] Vehicle detected (SysID "
-                  << int(msg.sysid) << ")" << std::endl;
         break;
     }
+
+
 
     // ================= BATTERY =================
     case MAVLINK_MSG_ID_SYS_STATUS: {
@@ -147,8 +167,8 @@ void TelemetryParser::parse(uint8_t byte) {
 
     // ================= COMMAND ACK =================
     case MAVLINK_MSG_ID_COMMAND_ACK: {
-        if (telemetry.last_command_ack.valid)
-            break;
+        //if (telemetry.last_command_ack.valid)
+           // break;
 
         mavlink_command_ack_t ack;
         mavlink_msg_command_ack_decode(&msg, &ack);
@@ -161,6 +181,46 @@ void TelemetryParser::parse(uint8_t byte) {
 
         std::cout << "[ACK] CMD=" << ack.command
                   << " RESULT=" << int(ack.result) << std::endl;
+        break;
+    }
+
+    // ================= MISSION REQUEST INT =================
+    case MAVLINK_MSG_ID_MISSION_REQUEST_INT: {
+        mavlink_mission_request_int_t req;
+        mavlink_msg_mission_request_int_decode(&msg, &req);
+        telemetry.last_mission_request_seq = req.seq;
+        telemetry.mission_request_received = true;
+        // std::cout << "[MISSION] REQUEST_INT seq=" << req.seq << std::endl;
+        break;
+    }
+
+    // ================= MISSION REQUEST (legacy) =================
+    case MAVLINK_MSG_ID_MISSION_REQUEST: {
+        mavlink_mission_request_t req;
+        mavlink_msg_mission_request_decode(&msg, &req);
+        telemetry.last_mission_request_seq = req.seq;
+        telemetry.mission_request_received = true;
+        // std::cout << "[MISSION] REQUEST seq=" << req.seq << std::endl;
+        break;
+    }
+
+    // ================= MISSION ACK =================
+    case MAVLINK_MSG_ID_MISSION_ACK: {
+        mavlink_mission_ack_t ack;
+        mavlink_msg_mission_ack_decode(&msg, &ack);
+        telemetry.last_mission_ack.type = ack.type;
+        telemetry.last_mission_ack.valid = true;
+        // std::cout << "[MISSION] ACK type=" << int(ack.type) << std::endl;
+        break;
+    }
+
+    // ================= MISSION CURRENT =================
+    case MAVLINK_MSG_ID_MISSION_CURRENT: {
+        mavlink_mission_current_t current;
+        mavlink_msg_mission_current_decode(&msg, &current);
+        telemetry.mission_current_seq = current.seq;
+        telemetry.mission_current_received = true;
+        // std::cout << "[MISSION] CURRENT seq=" << current.seq << std::endl;
         break;
     }
 
@@ -177,6 +237,7 @@ void TelemetryParser::parse(uint8_t byte) {
 
     telemetry.last_status_text[
         sizeof(telemetry.last_status_text) - 1] = '\0';
+    telemetry.status_text_updated = true;
 
     // ---------------- PREFLIGHT OK DETECTION ----------------
     if (strstr(st.text, "Ready for takeoff") ||
@@ -186,6 +247,37 @@ void TelemetryParser::parse(uint8_t byte) {
 
         break;
     }
+    case MAVLINK_MSG_ID_GLOBAL_POSITION_INT: {
+        mavlink_global_position_int_t pos;
+        mavlink_msg_global_position_int_decode(&msg, &pos);
+
+        telemetry.latitude_deg  = pos.lat / 1e7;
+        telemetry.longitude_deg = pos.lon / 1e7;
+
+        telemetry.relative_alt_m = pos.relative_alt / 1000.0f;
+        telemetry.altitude_received = true;
+
+        telemetry.position_received = true;
+        break;
+    }
+    // src/telemetry/TelemetryParser.cpp
+
+    case MAVLINK_MSG_ID_VFR_HUD: {
+        mavlink_vfr_hud_t hud;
+        mavlink_msg_vfr_hud_decode(&msg, &hud);
+
+        telemetry.airspeed = hud.airspeed;
+        telemetry.groundspeed = hud.groundspeed;
+        telemetry.heading = hud.heading;
+        telemetry.throttle = hud.throttle;
+        telemetry.climb_rate = hud.climb;
+        telemetry.hud_received = true;
+
+        // Note: We use relative_alt_m from GLOBAL_POSITION_INT for higher precision,
+        // but hud.alt is also available here if needed.
+        break;
+    }
+
 
 
     default:

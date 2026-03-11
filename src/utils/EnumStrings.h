@@ -19,14 +19,17 @@ inline const char* toString(VehicleCommand cmd) {
 // ---------------- MissionState ----------------
 inline const char* toString(mission::MissionState s) {
     switch (s) {
-    case mission::MissionState::INIT:      return "INIT";
-    case mission::MissionState::PREFLIGHT: return "PREFLIGHT";
-    case mission::MissionState::ARMED:     return "ARMED";
-    case mission::MissionState::TRANSIT:   return "TRANSIT";
-    case mission::MissionState::SEARCH:    return "SEARCH";
-    case mission::MissionState::ENGAGE:    return "ENGAGE";
-    case mission::MissionState::RTB:       return "RTB";
-    case mission::MissionState::COMPLETE:  return "COMPLETE";
-    default:                               return "UNKNOWN_STATE";
+    case mission::MissionState::INIT:          return "INIT";
+    case mission::MissionState::PREFLIGHT:     return "PREFLIGHT";
+    case mission::MissionState::ARM_REQUESTED: return "ARM_REQUESTED"; // 🔹 FIX
+    case mission::MissionState::ARMED:         return "ARMED";
+    case mission::MissionState::TRANSIT:       return "TRANSIT";
+    case mission::MissionState::SEARCH:        return "SEARCH";
+    case mission::MissionState::ENGAGE:        return "ENGAGE";
+    case mission::MissionState::ASSESS:        return "ASSESS";
+    case mission::MissionState::RTB:           return "RTB";
+    case mission::MissionState::COMPLETE:      return "COMPLETE";
+    case mission::MissionState::ABORTED:       return "ABORTED";
+    default:                                   return "UNKNOWN_STATE";
     }
 }

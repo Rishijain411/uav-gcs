@@ -1,10 +1,12 @@
 #pragma once
 
 #include <iostream>
-using namespace std;
+#include <string>
+
 #include "utils/EnumStrings.h"
 #include "mission/Mission.h"
 #include "mission/MissionEvent.h"
+#include "mission/MissionAbortReason.h"
 #include "authority/OperatorAuthorization.h"
 #include "authority/AuditLogger.h"
 #include "command/VehicleCommand.h"
@@ -13,7 +15,9 @@ class MissionTransitionAuthority {
 public:
     static bool requestTransition(
         mission::Mission& mission,
-        mission::MissionEvent event)
+        mission::MissionEvent event,
+        MissionAbortReason reason = MissionAbortReason::NONE,
+        const std::string& detail = "")
     {
         auto from_state = mission.state();
 
@@ -22,34 +26,56 @@ public:
         // ----------------------------------
         if (requiresOperatorConfirmation(from_state, event)) {
 
-            // If no pending request, issue one
             if (!OperatorAuthorization::hasPending()) {
-                cout << "[MISSION AUTH] Operator confirmation required\n";
+                std::cout << "[MISSION AUTH] Operator confirmation required\n";
 
                 OperatorAuthorization::request(
-                    VehicleCommand::NONE,   // mission-level decision
+                    VehicleCommand::NONE,
                     from_state
                 );
 
-                return false; // wait for operator
+                return false; // waiting
             }
 
-            // Poll operator decision (non-blocking)
             auto decision = OperatorAuthorization::pollDecision();
             if (!decision.has_value()) {
                 return false; // still waiting
             }
 
             if (!decision.value()) {
+                OperatorAuthorization::consumeDecision();
+
                 AuditLogger::logMissionTransition(
                     from_state,
                     event,
                     "DENIED",
                     "Operator rejected");
 
-                cout << "[MISSION AUTH] Transition denied by operator\n";
+                std::cout << "[MISSION AUTH] Transition denied by operator\n";
                 return false;
             }
+        }
+
+        // ----------------------------------
+        // PRD: Explicit Abort Reason Handling
+        // ----------------------------------
+        if (event == mission::MissionEvent::SYSTEM_FAILURE) {
+
+            mission.setAbortReason(reason);
+
+            AuditLogger::logMissionAbort(
+                mission.state(),
+                reason,
+                detail
+            );
+
+            std::cout << "[MISSION ABORT] Reason="
+                      << toString(reason);
+
+            if (!detail.empty())
+                std::cout << " (" << detail << ")";
+
+            std::cout << std::endl;
         }
 
         // ----------------------------------
@@ -58,16 +84,18 @@ public:
         bool ok = mission.apply_event(event);
 
         if (ok) {
+            OperatorAuthorization::consumeDecision();
+
             AuditLogger::logMissionTransition(
                 from_state,
                 event,
                 "ACCEPTED");
 
-            cout << "[MISSION] "
-                 << mission::to_string(from_state)
-                 << " → "
-                 << mission::to_string(mission.state())
-                 << endl;
+            std::cout << "[MISSION] "
+                      << mission::to_string(from_state)
+                      << " → "
+                      << mission::to_string(mission.state())
+                      << std::endl;
         } else {
             AuditLogger::logMissionTransition(
                 from_state,
@@ -75,7 +103,7 @@ public:
                 "REJECTED",
                 "Policy denied");
 
-            cout << "[MISSION AUTH] Transition rejected by policy\n";
+            std::cout << "[MISSION AUTH] Transition rejected by policy\n";
         }
 
         return ok;
@@ -86,7 +114,6 @@ private:
         mission::MissionState from,
         mission::MissionEvent event)
     {
-        // PRD: Explicit human confirmation required for escalation
         return
             (from == mission::MissionState::PREFLIGHT &&
              event == mission::MissionEvent::PREFLIGHT_OK) ||

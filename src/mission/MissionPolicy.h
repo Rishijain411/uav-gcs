@@ -16,12 +16,18 @@ public:
 
             case MissionState::PREFLIGHT:
                 return event == MissionEvent::PREFLIGHT_OK ||
-                       event == MissionEvent::PREFLIGHT_FAIL ||
-                       event == MissionEvent::OPERATOR_ABORT;
+                    event == MissionEvent::PREFLIGHT_FAIL ||
+                    event == MissionEvent::OPERATOR_ABORT;
+
+            case MissionState::ARM_REQUESTED:
+                return event == MissionEvent::VEHICLE_ARMED ||
+                    event == MissionEvent::SYSTEM_FAILURE ||
+                    event == MissionEvent::OPERATOR_ABORT;
 
             case MissionState::ARMED:
-                return event == MissionEvent::TRANSIT_REACHED ||
-                       event == MissionEvent::OPERATOR_ABORT;
+                return event == MissionEvent::OPERATOR_AUTO_CONFIRM ||
+                    event == MissionEvent::OPERATOR_ABORT;
+
 
             case MissionState::TRANSIT:
                 return event == MissionEvent::TRANSIT_REACHED ||
@@ -29,11 +35,18 @@ public:
 
             case MissionState::SEARCH:
                 return event == MissionEvent::TARGET_DETECTED ||
+                       event == MissionEvent::ENGAGEMENT_FAILED ||
                        event == MissionEvent::SYSTEM_FAILURE;
 
             case MissionState::ENGAGE:
                 return event == MissionEvent::ENGAGEMENT_COMPLETE ||
-                       event == MissionEvent::ENGAGEMENT_FAILED ||
+                       event == MissionEvent::SYSTEM_FAILURE;
+
+            // -------------------------------
+            // Phase 4.1 — Battle Damage Assessment
+            // -------------------------------
+            case MissionState::ASSESS:
+                return event == MissionEvent::BDA_EVALUATED ||
                        event == MissionEvent::SYSTEM_FAILURE;
 
             case MissionState::RTB:

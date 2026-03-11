@@ -1,0 +1,49 @@
+{
+  "target_id": "OMEGA_TEST_ASSET",
+  "schema_version": 1,
+
+  "performance": {
+    "cruise_speed_m_s": 15.0,
+    "max_climb_rate_m_s": 3.0,
+    "acceptance_radius_m": 8.0
+  },
+
+  "engagement_thresholds": {
+    "min_target_confidence": 0.85,
+    "max_engagement_range_m": 500.0
+  },
+
+  "crypto": {
+    "key_id": "V2_TEST_KEY",
+    "key_epoch": 3,
+    "mission_key_hex": "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff"
+  },
+
+  "search_area": {
+    "vertices": [
+      [47.3970, 8.5440, 40.0],
+      [47.4000, 8.5440, 40.0],
+      [47.4000, 8.5480, 40.0],
+      [47.3970, 8.5480, 40.0]
+    ],
+    "min_altitude_m": 20.0,
+    "max_altitude_m": 150.0
+  },
+
+  "waypoints": [
+    [47.3980, 8.5450, 50.0],
+    [47.3995, 8.5470, 80.0]
+  ],
+
+  "payload_policy": {
+    "type": "KINETIC",
+    "arm_on_engagement": true,
+    "arming_delay_seconds": 2.0
+  },
+
+  "failsafe_rules": {
+    "comms_loss": "RTL",
+    "low_battery": "LAND",
+    "gps_jamming": "HOLD"
+  }
+}

@@ -14,6 +14,12 @@ struct CommandAckData {
     bool valid = false;
 };
 
+/* ---------- Mission ACK ---------- */
+struct MissionAckData {
+    uint8_t type = MAV_MISSION_ERROR;
+    bool valid = false;
+};
+
 enum class ArmState {
     DISARMED,
     ARMED
@@ -75,6 +81,18 @@ struct TelemetryData {
     // ---------- Command ACK ----------
     CommandAckData last_command_ack;
 
+    // ---------- Mission Upload ----------
+    bool mission_request_received = false;
+    uint16_t last_mission_request_seq = 0;
+    MissionAckData last_mission_ack;
+    bool mission_upload_in_progress = false;
+    bool mission_upload_complete = false;
+    bool mission_upload_failed = false;
+    
+    // Mission execution tracking (from MISSION_CURRENT)
+    uint16_t mission_current_seq = 0;
+    bool mission_current_received = false;
+
     // ---------- Connection ----------
     bool heartbeat_received = false;
     uint8_t system_id = 0;
@@ -97,6 +115,24 @@ struct TelemetryData {
     FlightPhase flight_phase = FlightPhase::UNKNOWN;
     bool extended_state_received = false;
 
+    // ---------- Altitude ----------
+    float relative_alt_m = 0.0f;
+    bool altitude_received = false;
+
+    // ---------- Global Position ----------
+    double latitude_deg = 0.0;
+    double longitude_deg = 0.0;
+    bool position_received = false;
+
+    // ---------- HUD / Speed Metrics ----------
+    float airspeed = 0.0f;
+    float groundspeed = 0.0f;
+    int16_t heading = 0;       // 0-360 degrees
+    uint16_t throttle = 0;     // 0-100%
+    float climb_rate = 0.0f;   // m/s
+    bool hud_received = false;
+
+
     // ---------- Phase 5: Last Command Block Reason ----------
     CommandBlockReason last_block_reason =
         CommandBlockReason::NONE;
@@ -117,6 +153,7 @@ struct TelemetryData {
 
     // ---------- Last PX4 status text ----------
     char last_status_text[50] = {0};
+    bool status_text_updated = false;
 
     // ---------- Target / Engagement Telemetry ----------
     bool target_detected = false;
@@ -133,10 +170,15 @@ struct TelemetryData {
     }
 
     bool isAirborne() const {
-        return flight_phase == FlightPhase::IN_AIR;
+        return altitude_received &&
+            relative_alt_m > 1.5f &&   // PX4-safe takeoff threshold
+            flight_phase == FlightPhase::IN_AIR;
     }
 
     bool isLanded() const {
-        return flight_phase == FlightPhase::ON_GROUND;
+        return altitude_received &&
+            relative_alt_m < 0.3f &&
+            flight_phase == FlightPhase::ON_GROUND;
     }
+
 };
