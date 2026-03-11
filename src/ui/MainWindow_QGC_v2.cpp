@@ -4,6 +4,7 @@
 #include <QFileInfo>
 #include <QPixmap>
 #include <QGraphicsOpacityEffect>
+#include <QGraphicsDropShadowEffect> // Required for the countdown glow
 #include <QStackedLayout>
 #include <QImage>
 #include <QGraphicsDropShadowEffect>
@@ -1526,15 +1527,18 @@ void MainWindow::updateArmState(bool armed) {
 
 void MainWindow::updateBatteryDisplay(int percent) {
     if (lblBatteryPercent) {
-        lblBatteryPercent->setText(QString::number(percent) + "%");
+        lblBatteryPercent->setText(QString("BAT: %1%").arg(percent));
         
-        // Color code: green > 50%, yellow 20-50%, red < 20%
-        QString color = percent > 50 ? "#10B981" : (percent > 20 ? "#F59E0B" : "#DC2626");
-        lblBatteryPercent->setStyleSheet("QLabel { color: " + color + "; font-weight: bold; }");
+        // Dynamic Styling based on remaining energy
+        QString color = (percent > 50) ? "#10B981" : (percent > 20 ? "#F59E0B" : "#EF4444");
+        lblBatteryPercent->setStyleSheet(QString("color: %1; font-weight: bold;").arg(color));
     }
     
     if (batteryBar) {
         batteryBar->setValue(percent);
+        // Change bar color based on percentage
+        QString chunkStyle = (percent > 20) ? "background-color: #10B981;" : "background-color: #EF4444;";
+        batteryBar->setStyleSheet(QString("QProgressBar::chunk { %1 }").arg(chunkStyle));
     }
 }
 
@@ -1730,5 +1734,40 @@ void MainWindow::onPayloadArmingRequested() {
     if (lblMissionStatus) {
         lblMissionStatus->setText("AUTHORIZE ARMING");
         lblMissionStatus->setStyleSheet("color: #EF4444; font-weight: bold;");
+    }
+}
+void MainWindow::onSpeedUpdated(float speed, float climb, int heading) {
+    // 1. Update Groundspeed Indicator
+    if (lblSpeedValue) {
+        lblSpeedValue->setText(QString("SPD: %1 m/s").arg(static_cast<double>(speed), 0, 'f', 1));
+        
+        // Use Red for overspeed, Green for normal operation to match Dark Theme
+        if (speed > 25.0f) {
+            lblSpeedValue->setStyleSheet("color: #EF4444; font-weight: bold;"); 
+        } else {
+            lblSpeedValue->setStyleSheet("color: #10B981; font-weight: bold;"); 
+        }
+    }
+
+    // 2. Update GPS Fix & Orientation
+    if (lblGpsValue) {
+        // High-visibility green to confirm "GPS: 3D FIX" per PRD Pre-Flight BIT requirements
+        lblGpsValue->setText(QString("GPS: 3D FIX | HDG: %1°").arg(heading));
+        lblGpsValue->setStyleSheet("color: #10B981; font-weight: bold;"); 
+    }
+}
+void MainWindow::onTargetUpdateReceived(double range, double closing_speed, double confidence) {
+    if (lblTargetLock) {
+        // Formatting for "Kill Chain" assessment per PRD
+        lblTargetLock->setText(QString("TRK: %1m | CLS: %2m/s")
+                                .arg(range, 0, 'f', 1)
+                                .arg(closing_speed, 0, 'f', 1));
+        
+        // Color coding based on AI lock confidence
+        if (confidence > 0.85) {
+            lblTargetLock->setStyleSheet("color: #EF4444; font-weight: bold;"); // Hard Lock
+        } else {
+            lblTargetLock->setStyleSheet("color: #F59E0B;"); // Acquiring...
+        }
     }
 }

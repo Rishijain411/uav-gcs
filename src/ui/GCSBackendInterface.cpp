@@ -22,7 +22,8 @@ void GCSBackendInterface::onMissionStateChanged(
 }
 
 void GCSBackendInterface::onTelemetryUpdated(const TelemetryData& telemetry) {
-    // Position
+    // 1. Position & Altitude (Coordinates)
+    // Only emit if there is a meaningful change to preserve UI performance
     if (telemetry.latitude_deg != last_telemetry_.latitude_deg ||
         telemetry.longitude_deg != last_telemetry_.longitude_deg ||
         telemetry.relative_alt_m != last_telemetry_.relative_alt_m) {
@@ -30,7 +31,15 @@ void GCSBackendInterface::onTelemetryUpdated(const TelemetryData& telemetry) {
                             telemetry.relative_alt_m);
     }
     
-    // Arm state
+    // 2. Real-Time HUD Metrics (Groundspeed, Climb Rate, Heading)
+    // Satisfies PRD requirement for 10Hz telemetry update rate
+    if (telemetry.groundspeed != last_telemetry_.groundspeed ||
+        telemetry.climb_rate != last_telemetry_.climb_rate ||
+        telemetry.heading != last_telemetry_.heading) {
+        emit speedUpdated(telemetry.groundspeed, telemetry.climb_rate, telemetry.heading);
+    }
+
+    // 3. Arm State Tracking
     if (telemetry.arm_state != last_telemetry_.arm_state) {
         emit armStateChanged(telemetry.arm_state == ArmState::ARMED);
     }
@@ -46,12 +55,25 @@ void GCSBackendInterface::onTelemetryUpdated(const TelemetryData& telemetry) {
         emit ekfStatusChanged(telemetry.ekf_ok);
     }
     
-    // Mission current waypoint (when uploaded)
+    // 6. Mission Execution Tracking (PX4 Mission sequence)
     if (telemetry.mission_current_received && 
         telemetry.mission_current_seq != last_telemetry_.mission_current_seq) {
         emit missionCurrentWaypoint(telemetry.mission_current_seq);
     }
+
+    // 7. Target Tracking (Phase 3: Engagement Telemetry)
+    // Critical for visualizing the "Kill Chain" and intercept course
+    if (telemetry.target_detected) {
+        emit targetUpdateReceived(telemetry.target_range_m, 
+                                 telemetry.target_closing_speed, 
+                                 telemetry.target_confidence);
+    }
     
+    // 8. Health Status Bridge (BIT Checkboxes)
+    // Pushes real-time status to the Pre-Flight BIT checkboxes in the sidebar
+    emit healthStatusUpdated(telemetry.ekf_ok, telemetry.battery_ok, telemetry.heartbeat_received);
+
+    // Update local cache for the next delta check
     last_telemetry_ = telemetry;
 }
 

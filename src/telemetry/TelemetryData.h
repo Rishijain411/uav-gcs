@@ -124,6 +124,13 @@ struct TelemetryData {
     double longitude_deg = 0.0;
     bool position_received = false;
 
+    // ---------- HUD / Speed Metrics ----------
+    float airspeed = 0.0f;
+    float groundspeed = 0.0f;
+    int16_t heading = 0;       // 0-360 degrees
+    uint16_t throttle = 0;     // 0-100%
+    float climb_rate = 0.0f;   // m/s
+    bool hud_received = false;
 
 
     // ---------- Phase 5: Last Command Block Reason ----------

@@ -44,7 +44,8 @@ int main(int argc, char *argv[]) {
                     &window, &MainWindow::onStatusUpdated);
     QObject::connect(backend_interface, &GCSBackendInterface::healthStatusUpdated,
                     &window, &MainWindow::onHealthStatusUpdated);
-    
+    QObject::connect(backend_interface, &GCSBackendInterface::speedUpdated,
+                &window, &MainWindow::onSpeedUpdated);
     // Recovery & RTB connections (New)
     QObject::connect(backend_interface, &GCSBackendInterface::commsLossDetected,
                     &window, &MainWindow::onCommsLoss);

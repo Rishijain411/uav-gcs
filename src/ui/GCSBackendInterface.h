@@ -53,7 +53,8 @@ signals:
     void modeChanged(const QString& mode);
     void batteryUpdated(float voltage, float current, int remaining);
     void ekfStatusChanged(bool ready);
-    
+    void speedUpdated(float speed, float climb, int heading);
+    void targetUpdateReceived(double range, double closing_speed, double confidence);
     // Mission execution
     void missionUploadStarted();
     void missionUploadProgress(int sent, int total);

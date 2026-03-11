@@ -260,6 +260,23 @@ void TelemetryParser::parse(uint8_t byte) {
         telemetry.position_received = true;
         break;
     }
+    // src/telemetry/TelemetryParser.cpp
+
+    case MAVLINK_MSG_ID_VFR_HUD: {
+        mavlink_vfr_hud_t hud;
+        mavlink_msg_vfr_hud_decode(&msg, &hud);
+
+        telemetry.airspeed = hud.airspeed;
+        telemetry.groundspeed = hud.groundspeed;
+        telemetry.heading = hud.heading;
+        telemetry.throttle = hud.throttle;
+        telemetry.climb_rate = hud.climb;
+        telemetry.hud_received = true;
+
+        // Note: We use relative_alt_m from GLOBAL_POSITION_INT for higher precision,
+        // but hud.alt is also available here if needed.
+        break;
+    }
 
 
 

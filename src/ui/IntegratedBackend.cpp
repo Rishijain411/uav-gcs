@@ -462,55 +462,51 @@ void IntegratedBackend::runBackendLoop() {
         commandManager.update(telemetry, stateManager.getMutableState());
         missionController.update(mission, telemetry);
         
-        // Emit telemetry updates to UI
+        // --- RATE-LIMITED TELEMETRY STREAM TO UI (Fixes SIGSEGV) ---
         if (telemetry.heartbeat_received) {
-            emit ui_interface_->positionUpdated(
-                telemetry.latitude_deg, 
-                telemetry.longitude_deg, 
-                telemetry.relative_alt_m
-            );
             
-            // Emit arm state change (only when state actually changes)
-            static ArmState last_arm_state = ArmState::DISARMED;
-            if (telemetry.arm_state != last_arm_state) {
-                last_arm_state = telemetry.arm_state;
-                emit ui_interface_->armStateChanged(
-                    telemetry.arm_state == ArmState::ARMED
-                );
+            // 1. Mission State: Only emit on actual transition
+            static mission::MissionState last_emitted_state = mission::MissionState::INIT;
+            if (mission.state() != last_emitted_state) {
+                QString missionState = QString::fromStdString(mission::to_string(mission.state()));
+                emit ui_interface_->missionStateChanged(missionState);
+                last_emitted_state = mission.state();
             }
-            
-            // Emit flight mode
-            QString mode = "UNKNOWN";
-            if (telemetry.flight_phase == FlightPhase::IN_AIR) {
-                mode = "IN_AIR";
-            } else if (telemetry.arm_state == ArmState::ARMED) {
-                mode = "ARMED";
-            } else {
-                mode = "DISARMED";
-            }
-            emit ui_interface_->modeChanged(mode);
-            
-            // Emit mission state from MissionController
-            QString missionState = QString::fromStdString(mission::to_string(mission.state()));
-            emit ui_interface_->missionStateChanged(missionState);
 
+            // 2. Flight Mode: Only emit on actual change
+            static QString last_mode;
+            QString currentMode = (telemetry.flight_phase == FlightPhase::IN_AIR) ? "IN_AIR" : 
+                                 (telemetry.arm_state == ArmState::ARMED ? "ARMED" : "DISARMED");
+            if (currentMode != last_mode) {
+                emit ui_interface_->modeChanged(currentMode);
+                last_mode = currentMode;
+            }
+
+            // 3. Telemetry Bridge: Throttle to 10Hz (Every 100ms) per PRD
+            static auto last_telem_time = std::chrono::steady_clock::now();
+            if (now - last_telem_time >= std::chrono::milliseconds(100)) {
+                
+                // Push coordinates and speed metrics
+                emit ui_interface_->positionUpdated(
+                    telemetry.latitude_deg, 
+                    telemetry.longitude_deg, 
+                    telemetry.relative_alt_m
+                );
+
+                if (ui_interface_) {
+                    ui_interface_->onTelemetryUpdated(telemetry);
+                }
+                
+                last_telem_time = now;
+            }
+
+            // 4. Status Text: Only emit when updated by PX4
             if (telemetry.status_text_updated) {
                 telemetry.status_text_updated = false;
-                const std::string current_text = telemetry.last_status_text;
-                const bool recently_emitted =
-                    (current_text == last_status_text_emitted) &&
-                    (std::chrono::duration_cast<std::chrono::milliseconds>(
-                         now - last_status_text_time).count() < 2000);
-
-                if (!current_text.empty() && !recently_emitted) {
-                    emit ui_interface_->statusUpdated(
-                        QString::fromUtf8(current_text.c_str()));
-                    last_status_text_emitted = current_text;
-                    last_status_text_time = now;
-                }
+                emit ui_interface_->statusUpdated(QString::fromUtf8(telemetry.last_status_text));
             }
             
-            // Emit health status for BIT checkboxes
+            // 5. BIT Health: Update UI checkboxes
             emit ui_interface_->healthStatusUpdated(
                 telemetry.ekf_ok,
                 telemetry.battery_ok,
